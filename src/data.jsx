@@ -35,10 +35,36 @@ async function fetchISS() {
            kind:'iss', name:'ISS · ZARYA', time: Date.now() };
 }
 
+// Global ADS-B sampling grid. The free aggregators expose a per-point radius
+// API (`/v2/point/<lat>/<lon>/250` = all aircraft within 250 nm of the point).
+// To cover the whole planet we fan out to ~40 anchor points sized so the
+// 250nm disks overlap slightly — this reaches every continent, major oceans,
+// polar regions and underserved South America / Africa / Central Asia.
+// Deduped by aircraft hex so overlap doesn't double-count flights.
 const FLIGHT_HOTSPOTS = [
-  [51.5,-0.12], [40.7,-74], [34.05,-118.2], [35.68,139.7], [1.35,103.8],
-  [25.2,55.27], [-33.86,151.2], [-23.55,-46.63], [19.43,-99.13], [28.6,77.2],
-  [50.1,8.68], [41.9,12.5], [37.98,23.7], [55.75,37.6], [31.2,121.5],
+  // Europe
+  [51.5,-0.12], [50.1,8.68], [41.9,12.5], [37.98,23.7], [55.75,37.6],
+  [64.13,-21.94], [52.23,21.01], [60.17,24.94],
+  // North America
+  [40.7,-74], [41.88,-87.63], [34.05,-118.2], [29.76,-95.37], [49.28,-123.12],
+  [61.22,-149.9], [43.65,-79.38], [25.76,-80.19],
+  // Central / South America
+  [19.43,-99.13], [-23.55,-46.63], [4.71,-74.07], [-12.05,-77.04],
+  [-34.6,-58.38], [-33.45,-70.67],
+  // Africa
+  [30.04,31.24], [6.52,3.38], [-26.2,28.04], [-1.29,36.82], [33.57,-7.59],
+  [14.72,-17.47],
+  // Middle East / Central Asia
+  [25.2,55.27], [35.7,51.42], [41.01,28.98], [24.71,46.68], [43.24,76.89],
+  // South Asia
+  [28.6,77.2], [24.86,67.0], [19.07,72.87], [23.73,90.4],
+  // East / Southeast Asia
+  [31.2,121.5], [35.68,139.7], [37.57,126.98], [22.28,114.16], [25.03,121.56],
+  [13.75,100.49], [14.6,120.98], [-6.2,106.85], [1.35,103.8], [10.82,106.63],
+  // Oceania / Pacific
+  [-33.86,151.2], [-37.81,144.96], [-36.85,174.76], [21.31,-157.86],
+  // Polar / remote
+  [-54.8,-68.3], [78.22,15.65],
 ];
 // Community ADS-B aggregators — all free, no key, same API shape.
 // Tried in order per hotspot; first successful response wins. This gives us
@@ -164,15 +190,21 @@ function classifySat(name) {
 }
 
 async function fetchSatellites() {
-  // The API returns pages of {name, line1, line2, satelliteId}. We pull several
-  // pages in parallel to build a decent sample (~200 sats).
-  const pages = [1, 2, 3, 4, 5];
-  const PAGE_SIZE = 40;
+  // The API returns pages of {name, line1, line2, satelliteId}. We pull a
+  // larger spread (~600 sats) so the orbital belt reads as a real swarm rather
+  // than a sparse sprinkle, plus dedicated searches for the major
+  // constellations so they render even if they're not in the first N pages.
+  const pages = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const PAGE_SIZE = 60;
   const all = await Promise.all(pages.map(p =>
     safeFetch(`https://tle.ivanstanojevic.me/api/tle/?page=${p}&page-size=${PAGE_SIZE}`)
   ));
-  // Plus a dedicated Starlink page
-  const starlink = await safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=starlink&page-size=60`);
+  const searches = await Promise.all([
+    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=starlink&page-size=60`),
+    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=iridium&page-size=40`),
+    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=oneweb&page-size=40`),
+    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=gps&page-size=40`),
+  ]);
   const out = [];
   const seen = new Set();
   const consume = (j) => {
@@ -188,7 +220,7 @@ async function fetchSatellites() {
     }
   };
   for (const p of all) consume(p);
-  consume(starlink);
+  for (const s of searches) consume(s);
   return out;
 }
 

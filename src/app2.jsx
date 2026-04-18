@@ -126,7 +126,11 @@ function SearchBar({ onLocate, targets, theme }) {
       </button>
       {open && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-28" onClick={()=>setOpen(false)}>
-          <div className="absolute inset-0 bg-black/30 dark:bg-black/60 backdrop-blur-sm" />
+          {/* Dense backdrop — translucent versions let the Feed pill + stat
+              pill behind it leak through and confuse the eye. 75/90% black
+              + heavier blur obscures the underlying UI while keeping the
+              globe ambiently visible. */}
+          <div className="absolute inset-0 bg-black/75 dark:bg-black/90 backdrop-blur-md" />
           <div className="relative w-[min(560px,92vw)] glass-strong rounded-2xl overflow-hidden" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center gap-3 px-4 py-3 border-b border-black/5 dark:border-white/5">
               <Icon name="search" className="w-4 h-4 opacity-60" />
@@ -957,7 +961,7 @@ function App() {
             row 1: brand + actions (search / layers / theme)
             row 2: compact stat pill (only top 3 stats shown at this breakpoint)
           On sm+ everything lives on one line. */}
-      <div className="absolute top-3 sm:top-4 left-3 sm:left-4 right-3 sm:right-4 z-10 flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-2 sm:gap-3 pointer-events-none">
+      <div className="absolute top-3 sm:top-4 left-3 sm:left-4 right-3 sm:right-4 z-30 flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-2 sm:gap-3 pointer-events-none">
         <div className="flex items-center justify-between gap-2 pointer-events-auto min-w-0 sm:flex-wrap order-1">
           <div className="glass rounded-full pl-3 pr-3 sm:pr-4 py-2 flex items-center gap-2 shrink-0">
             <div className="w-2 h-2 rounded-full bg-accent-500 bpulse"/>
@@ -968,6 +972,15 @@ function App() {
           <div className="flex items-center gap-1.5 sm:hidden">
             <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
             <LayersPopover layers={layers} setLayers={setLayers} theme={theme}/>
+            <button
+              onClick={() => setAutoRotate(r => !r)}
+              title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
+              className={classNames(
+                'glass rounded-full p-2 transition hover:scale-105',
+                autoRotate && 'ring-2 ring-accent-500/50'
+              )}>
+              <Icon name={autoRotate ? 'reset' : 'pause'} className="w-4 h-4"/>
+            </button>
             <ThemeToggle theme={theme} onChange={setTheme}/>
           </div>
           <div className="min-w-0 max-w-full overflow-hidden hidden sm:block">
@@ -982,6 +995,15 @@ function App() {
         <div className="hidden sm:flex items-center gap-2 pointer-events-auto order-3">
           <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
           <LayersPopover layers={layers} setLayers={setLayers} theme={theme}/>
+          <button
+            onClick={() => setAutoRotate(r => !r)}
+            title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
+            className={classNames(
+              'glass rounded-full p-2 transition hover:scale-105',
+              autoRotate && 'ring-2 ring-accent-500/50'
+            )}>
+            <Icon name={autoRotate ? 'reset' : 'pause'} className="w-4 h-4"/>
+          </button>
           <ThemeToggle theme={theme} onChange={setTheme}/>
         </div>
       </div>
@@ -993,7 +1015,8 @@ function App() {
         </div>
       )}
 
-      {/* Live Feed — tucked below the mobile stat row, standard top-20 on sm+ */}
+      {/* Live Feed — left side on all breakpoints; mobile tucks it under the
+          stat row so it clears the top action cluster. */}
       <div className="absolute top-28 sm:top-20 left-3 sm:left-4 z-10 pointer-events-auto">
         <LiveFeed
           feed={feed}
@@ -1014,21 +1037,6 @@ function App() {
                       playing={playing} setPlaying={setPlaying}
                       playSpeed={playSpeed} setPlaySpeed={setPlaySpeed}/>
         </div>
-      </div>
-
-      {/* Auto-rotate toggle — sits above the ticker/timeline stack. Icon flips
-          so the user can see at a glance whether the globe will resume spinning
-          when they stop interacting. */}
-      <div className="absolute bottom-24 right-3 sm:bottom-28 sm:right-4 z-10 pointer-events-auto">
-        <button
-          onClick={() => setAutoRotate(r => !r)}
-          title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
-          className={classNames(
-            'glass rounded-full p-2 transition hover:scale-105',
-            autoRotate && 'ring-2 ring-accent-500/50'
-          )}>
-          <Icon name={autoRotate ? 'reset' : 'pause'} className="w-4 h-4"/>
-        </button>
       </div>
 
       {/* Help hint — desktop only; gets in the way on tablets/phones */}
