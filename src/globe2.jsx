@@ -255,6 +255,7 @@ function Globe({
 }) {
   const wrapRef = useRef(null);
   const baseRef = useRef(null);   // land (cached, redraws on rotation)
+  const windRef = useRef(null);   // wind particle layer (fade-clear, flows)
   const overRef = useRef(null);   // dynamic overlay (redraws every frame)
   const rotRef = useRef([0, -15, 0]);
   const scaleRef = useRef(Math.min(width, height) / 2.1);
@@ -275,6 +276,14 @@ function Globe({
   const shipHistRef   = useRef(new Map());
   const satHistRef    = useRef(new Map());
   const issHistRef    = useRef([]);
+  // Wind grid (global 5° u/v) + particle pool for the flow animation.
+  // Grid arrives from /api/wind via window.subscribeWind; particles are
+  // re-seeded on dimensions change and live across frames on their own
+  // canvas so the fade-clear creates visible trails.
+  const windGridRef = useRef(null);
+  const windParticlesRef = useRef([]);
+  const windViewRef = useRef(null);   // last rot/scale snapshot for smear detection
+  const WIND_PARTICLE_COUNT = 2000;
   // Auto-rotate runs whenever the `autoRotate` prop is true. On any user
   // interaction we fire `onInteract` so the parent can flip it off; to resume
   // the user clicks the toolbar rotate button (also triggers zoomOutSignal).
@@ -312,6 +321,31 @@ function Globe({
       ? data.flights.slice().sort((a, b) => (b.alt || 0) - (a.alt || 0))
       : [];
   }, [data.flights]);
+
+  // Wind — subscribe to the global grid from /api/wind (see src/wind.jsx).
+  useEffect(() => {
+    if (typeof window.subscribeWind !== 'function') return;
+    return window.subscribeWind((g) => { windGridRef.current = g; });
+  }, []);
+
+  // Initialise / refresh the wind particle pool when size changes. Random
+  // lon/lat and ages so the fade-in is staggered rather than synchronous.
+  useEffect(() => {
+    const pool = new Array(WIND_PARTICLE_COUNT);
+    for (let i = 0; i < WIND_PARTICLE_COUNT; i++) {
+      pool[i] = {
+        lon: Math.random() * 360 - 180,
+        lat: (Math.random() - 0.5) * 170,   // avoid absolute poles
+        // Longer lifetimes (~4-14 s at 60fps) so the respawn rate is lower
+        // and flow lines read as continuous streams rather than blinking
+        // dashes.
+        age: Math.random() * 400,
+        maxAge: 240 + Math.floor(Math.random() * 600),
+        prevX: null, prevY: null,
+      };
+    }
+    windParticlesRef.current = pool;
+  }, [width, height]);
 
   // Periodic prune of trail history — drop entries whose newest point is older
   // than TRAIL_STALE_MS. Without this, the flight/ship Maps grow unbounded as
@@ -713,15 +747,18 @@ function Globe({
   // Main draw loop
   useEffect(() => {
     let raf;
-    const base = baseRef.current, over = overRef.current;
-    if (!base || !over) return;
+    const base = baseRef.current, over = overRef.current, wind = windRef.current;
+    if (!base || !over || !wind) return;
     const dpr = Math.min(window.devicePixelRatio||1, 2);
     base.width = width*dpr; base.height = height*dpr;
     over.width = width*dpr; over.height = height*dpr;
+    wind.width = width*dpr; wind.height = height*dpr;
     base.style.width = width+'px'; base.style.height = height+'px';
     over.style.width = width+'px'; over.style.height = height+'px';
+    wind.style.width = width+'px'; wind.style.height = height+'px';
     const bctx = base.getContext('2d'); bctx.scale(dpr, dpr);
     const octx = over.getContext('2d'); octx.scale(dpr, dpr);
+    const wctx = wind.getContext('2d'); wctx.scale(dpr, dpr);
     dirtyBase.current = true;
 
     const tick = () => {
@@ -898,6 +935,126 @@ function Globe({
         bctx.strokeStyle = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.15)';
         bctx.lineWidth = 1; bctx.stroke();
         dirtyBase.current = false;
+      }
+
+      // Wind particle flow. Dedicated canvas using fade-clear (paint a
+      // translucent rect over the whole thing each frame) so moving particles
+      // leave short-lived trails. Bilinear interpolation on the 5° grid
+      // smooths the motion between anchor points.
+      const isDarkW = theme === 'dark';
+      if (layers.wind && windGridRef.current) {
+        const g = windGridRef.current;
+        const { latMin, lonMin, latStep, lonStep, nLat, nLon, u, v } = g;
+        const sampleWind = (lon, lat) => {
+          // wrap lon to the grid's range
+          let x = (lon - lonMin) / lonStep;
+          let y = (lat - latMin) / latStep;
+          if (x < 0) x += nLon; if (x >= nLon) x -= nLon;
+          if (y < 0 || y >= nLat - 1) return null;
+          const x0 = Math.floor(x) % nLon;
+          const x1 = (x0 + 1) % nLon;
+          const y0 = Math.floor(y);
+          const y1 = y0 + 1;
+          const fx = x - Math.floor(x), fy = y - y0;
+          const i00 = y0 * nLon + x0, i10 = y0 * nLon + x1;
+          const i01 = y1 * nLon + x0, i11 = y1 * nLon + x1;
+          // Bilinear
+          const uu = (1-fx)*(1-fy)*u[i00] + fx*(1-fy)*u[i10] + (1-fx)*fy*u[i01] + fx*fy*u[i11];
+          const vv = (1-fx)*(1-fy)*v[i00] + fx*(1-fy)*v[i10] + (1-fx)*fy*v[i01] + fx*fy*v[i11];
+          return [uu, vv];
+        };
+
+        // Always fade-clear — hard clearing every frame was flickering the
+        // layer during auto-rotate. When the globe's rotation or zoom has
+        // changed enough that old particle screen positions are stale, just
+        // drop the prev-coords so new segments start fresh; the fade does
+        // the visual cleanup within ~20 frames.
+        const view = windViewRef.current;
+        const rNow = rotRef.current, sNow = scaleRef.current;
+        const moved = !view
+          || Math.abs(view[0] - rNow[0]) > 0.05
+          || Math.abs(view[1] - rNow[1]) > 0.05
+          || Math.abs(view[2] - sNow) > 0.5;
+        if (moved) {
+          const particles = windParticlesRef.current;
+          for (let i = 0; i < particles.length; i++) {
+            particles[i].prevX = null;
+            particles[i].prevY = null;
+          }
+          windViewRef.current = [rNow[0], rNow[1], sNow];
+        }
+        wctx.save();
+        wctx.globalCompositeOperation = 'destination-out';
+        wctx.fillStyle = `rgba(0,0,0,${isDarkW ? 0.025 : 0.04})`;
+        wctx.fillRect(0, 0, width, height);
+        wctx.restore();
+
+        // Map m/s → HSL colour. Blue for calm, through cyan / green / yellow
+        // / orange / red, maxing out at "hurricane" speeds.
+        const windColor = (speed, alpha) => {
+          const t = Math.min(speed / 28, 1);
+          const hue = 210 - t * 210;        // 210 blue → 0 red
+          const sat = 65 + t * 25;
+          const light = 58 + (1 - t) * 8;
+          return `hsla(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%, ${alpha})`;
+        };
+
+        // Particle advance. SQRT compression on speed so 1 m/s still shows
+        // visible motion and 25 m/s isn't a blur. Direction vector is
+        // preserved; only the magnitude is remapped.
+        //
+        //   effective motion = direction × sqrt(speed + 0.5) × SCALE
+        //     1 m/s  → 1.22 units
+        //    10 m/s  → 3.24 units
+        //    25 m/s  → 5.05 units
+        //
+        // SCALE of 0.025 puts typical jet-stream flow at roughly 5°/s
+        // traverse — quick enough to read as flow, slow enough to track.
+        const SCALE = 0.025;
+        const particles = windParticlesRef.current;
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          p.age++;
+          // Respawn on age timeout or if position is wild.
+          if (p.age > p.maxAge || p.lat > 88 || p.lat < -88) {
+            p.lon = Math.random() * 360 - 180;
+            p.lat = (Math.random() - 0.5) * 160;
+            p.age = 0;
+            p.prevX = null; p.prevY = null;
+            continue;
+          }
+          const w = sampleWind(p.lon, p.lat);
+          if (!w) continue;
+          const [uu, vv] = w;
+          const speed = Math.hypot(uu, vv);
+          const visMag = Math.sqrt(speed + 0.5);
+          const dirX = uu / Math.max(speed, 0.01);
+          const dirY = vv / Math.max(speed, 0.01);
+          // Advance in degrees. Lon needs cos(lat) correction.
+          const latRad = p.lat * Math.PI / 180;
+          const cosLat = Math.max(0.05, Math.cos(latRad));
+          p.lat += dirY * visMag * SCALE;
+          p.lon += (dirX * visMag * SCALE) / cosLat;
+          if (p.lon > 180) p.lon -= 360;
+          if (p.lon < -180) p.lon += 360;
+
+          // Only draw when on the visible hemisphere.
+          if (!visibleOn(projection, p.lon, p.lat)) { p.prevX = null; p.prevY = null; continue; }
+          const pt = projection([p.lon, p.lat]);
+          if (!pt) continue;
+          if (p.prevX != null && p.prevY != null) {
+            wctx.beginPath();
+            wctx.moveTo(p.prevX, p.prevY);
+            wctx.lineTo(pt[0], pt[1]);
+            wctx.strokeStyle = windColor(speed, 0.9);
+            wctx.lineWidth = 1.3;
+            wctx.stroke();
+          }
+          p.prevX = pt[0]; p.prevY = pt[1];
+        }
+      } else if (wctx && !layers.wind) {
+        // Layer is off — clear the wind canvas once per frame cheaply.
+        wctx.clearRect(0, 0, width, height);
       }
 
       // Overlay (dynamic)
@@ -1369,6 +1526,7 @@ function Globe({
   return (
     <div ref={wrapRef} className="grabbable select-none" style={{ position:'relative', width, height, touchAction:'none' }}>
       <canvas ref={baseRef} style={{ position:'absolute', inset:0 }} />
+      <canvas ref={windRef} style={{ position:'absolute', inset:0, pointerEvents:'none' }} />
       <canvas ref={overRef} style={{ position:'absolute', inset:0, pointerEvents:'none' }} />
       {hover && (
         <div className="pointer-events-none absolute glass rounded-xl px-2.5 py-1.5 text-[11px] font-mono"
