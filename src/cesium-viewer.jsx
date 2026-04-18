@@ -157,10 +157,6 @@
   // --- Viewer construction ----------------------------------------------
   function mountViewer(modal, Cesium, { lon, lat, altMeters }) {
     const viewer = new Cesium.Viewer(modal.cesiumContainer, {
-      // OSM needs no API key and gives perfectly usable global imagery.
-      imageryProvider: new Cesium.OpenStreetMapImageryProvider({
-        url: 'https://tile.openstreetmap.org/',
-      }),
       // Default EllipsoidTerrainProvider is fine — we don't need heightmaps
       // for a photoreal-style dive-in at this altitude.
       baseLayerPicker: false,
@@ -176,6 +172,20 @@
       infoBox: false,
       selectionIndicator: false,
     });
+
+    // OSM needs no API key and gives perfectly usable global imagery. We add
+    // it post-construction via the layer collection — the `imageryProvider`
+    // constructor option and `OpenStreetMapImageryProvider` factory were
+    // deprecated in Cesium 1.104+, so we use UrlTemplateImageryProvider
+    // directly for the stable path in modern Cesium.
+    viewer.imageryLayers.removeAll();
+    viewer.imageryLayers.addImageryProvider(
+      new Cesium.UrlTemplateImageryProvider({
+        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        credit: '© OpenStreetMap contributors',
+        maximumLevel: 19,
+      })
+    );
 
     // Hide the loading shim once Cesium has taken over.
     if (modal.loading && modal.loading.parentNode) {
@@ -228,6 +238,10 @@
         modal.viewer = mountViewer(modal, Cesium, { lon, lat, altMeters: alt });
       })
       .catch((err) => {
+        // Same guard as the .then branch — if the user closed this modal
+        // (or opened a new one) while Cesium was still loading, don't
+        // touch the dead modal's DOM.
+        if (activeModal !== modal) return;
         console.error('[cesium] failed to load', err);
         if (modal.loading) modal.loading.textContent = 'Failed to load photoreal view.';
       });
