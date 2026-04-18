@@ -1,7 +1,7 @@
 /* God's Eye — app shell v2. Glass, minimal, time slider. */
 /* globals React, ReactDOM, Globe, fetchQuakes, fetchISS, fetchFlights, fetchEONET,
-           fetchKp, fetchAurora, fetchWeather, subscribeWikiEdits, fetchHN,
-           fetchTsunamis, COUNTRY_POINTS */
+           fetchKp, fetchAurora, fetchTsunamis, fetchSatellites, propagateSats,
+           loadSatcat */
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -119,10 +119,10 @@ function SearchBar({ onLocate, targets, theme }) {
 
   return (
     <>
-      <button onClick={()=>setOpen(true)} className="glass rounded-full pl-3 pr-4 py-2 flex items-center gap-2 text-sm hover:scale-[1.02] transition">
+      <button onClick={()=>setOpen(true)} title="Locate (/)" className="glass rounded-full p-2 sm:pl-3 sm:pr-4 sm:py-2 flex items-center gap-2 text-sm hover:scale-[1.02] transition">
         <Icon name="search" className="w-4 h-4 opacity-70" />
-        <span className="opacity-70">Locate</span>
-        <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 opacity-60">/</kbd>
+        <span className="opacity-70 hidden sm:inline">Locate</span>
+        <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 opacity-60 hidden sm:inline">/</kbd>
       </button>
       {open && (
         <div className="fixed inset-0 z-50 flex items-start justify-center pt-28" onClick={()=>setOpen(false)}>
@@ -279,7 +279,6 @@ function LayersPopover({ layers, setLayers, theme }) {
     ['quakes','Seismic',  'quake',   '#fb923c'],
     ['events','Natural events', 'fire', '#ef4444'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
-    ['wiki','Signal',     'wiki',    '#60a5fa'],
     ['tsunamis','Tsunami archive', 'tsunami', '#22d3ee'],
   ];
   return (
@@ -348,26 +347,33 @@ function StatBar({ data, kp }) {
   const quakeCount = data.quakes?.length || 0;
   const eventCount = data.events?.length || 0;
   const satCount = data.sats?.length || 0;
-  const wikiPerMin = data.wikiRate || 0;
+  // `tier` controls mobile truncation:
+  //   0 = always visible (phones through desktop)
+  //   1 = shown at sm: breakpoint and up (≥640px)
+  //   2 = shown at md: breakpoint and up (≥768px)
   const items = [
-    { label: 'Flights',      short: 'Flights',       val: flightCount.toLocaleString(), glyph: 'flight', color: '#7dd3fc', title: 'Aircraft currently airborne (ADS-B via airplanes.live)' },
-    { label: 'Ships',        short: 'Ships',         val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
-    { label: 'Satellites',   short: 'Sats',          val: satCount.toLocaleString(),    glyph: 'sat',    color: '#d946ef', title: 'Orbital objects propagated from CelesTrak TLEs' },
-    { label: 'Earthquakes',  short: 'Quakes',        val: quakeCount,                   glyph: 'quake',  color: '#fb923c', title: 'Seismic events in the last 24h (USGS)' },
-    { label: 'Natural events', short: 'Nature',      val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Active storms, wildfires, volcanoes, ice (NASA EONET)' },
-    { label: 'Geomagnetic',  short: 'Kp',            val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
-    { label: 'Wiki edits/min', short: 'Edits/m',     val: wikiPerMin,                   glyph: 'wiki',   color: '#60a5fa', title: 'Wikipedia edits per minute, globally (Wikimedia stream)' },
+    { label: 'Flights',      short: 'Flights', shortMobile: 'FLT', tier: 0, val: flightCount.toLocaleString(), glyph: 'flight', color: '#7dd3fc', title: 'Aircraft currently airborne (ADS-B via airplanes.live)' },
+    { label: 'Ships',        short: 'Ships',   shortMobile: 'SHP', tier: 0, val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
+    { label: 'Satellites',   short: 'Sats',    shortMobile: 'SAT', tier: 0, val: satCount.toLocaleString(),    glyph: 'sat',    color: '#d946ef', title: 'Orbital objects propagated from CelesTrak TLEs' },
+    { label: 'Earthquakes',  short: 'Quakes',  shortMobile: 'SEI', tier: 1, val: quakeCount,                   glyph: 'quake',  color: '#fb923c', title: 'Seismic events in the last 24h (USGS)' },
+    { label: 'Natural events', short: 'Nature',shortMobile: 'NAT', tier: 2, val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Active storms, wildfires, volcanoes, ice (NASA EONET)' },
+    { label: 'Geomagnetic',  short: 'Kp',      shortMobile: 'Kp',  tier: 1, val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
   ];
+  const visClass = t => t === 0 ? 'flex' : t === 1 ? 'hidden sm:flex' : 'hidden md:flex';
   return (
-    <div className="glass rounded-full pl-2 pr-3 py-1.5 flex items-center gap-3 text-xs relative overflow-x-auto scrollbar-none max-w-full">
+    <div className="glass rounded-full pl-2 pr-2.5 sm:pr-3 py-1.5 flex items-center gap-2 sm:gap-3 text-xs relative overflow-x-auto scrollbar-none max-w-full">
       {items.map((it, i) => (
         <React.Fragment key={it.label}>
-          {i > 0 && <div className="w-px h-3 bg-current opacity-10 shrink-0"/>}
-          <div title={it.title} className="flex items-center gap-1.5 cursor-help shrink-0">
+          {i > 0 && <div className={classNames('w-px h-3 bg-current opacity-10 shrink-0', visClass(it.tier))}/>}
+          <div title={it.title} className={classNames('items-center gap-1.5 cursor-help shrink-0', visClass(it.tier))}>
             <span className="inline-flex items-center justify-center" style={{ color: it.color }}>
               <GlyphSVG kind={it.glyph} color={it.color} size={12}/>
             </span>
-            <span className="text-[10px] uppercase font-mono opacity-60 tracking-wider">{it.short}</span>
+            {/* Short label always visible — mobile shows a 3-char abbreviation
+                so the number has a recognisable prefix; desktop gets the full
+                label back. */}
+            <span className="text-[10px] uppercase font-mono opacity-60 tracking-wider hidden sm:inline">{it.short}</span>
+            <span className="text-[10px] uppercase font-mono opacity-60 tracking-wider sm:hidden">{it.shortMobile}</span>
             <span className="font-mono tabular-nums">{it.val}</span>
           </div>
         </React.Fragment>
@@ -598,14 +604,25 @@ function LiveFeed({ feed, onPick, paused, onTogglePause }) {
   const [collapsed, setCollapsed] = useState(true);
   return (
     <div className={classNames(
-      "glass-strong rounded-2xl overflow-hidden transition-all",
-      collapsed ? "w-[160px]" : "w-[300px]"
+      "glass-strong rounded-full sm:rounded-2xl overflow-hidden transition-all",
+      collapsed
+        ? "w-[92px] sm:w-[160px]"                   // tiny pill on phones
+        : "w-[min(92vw,300px)] rounded-2xl"         // never wider than viewport
     )}>
       <button onClick={()=>setCollapsed(c=>!c)}
-              className="w-full flex items-center justify-between px-3 py-2 border-b border-black/5 dark:border-white/5">
-        <div className="flex items-center gap-2">
-          <div className={classNames("w-1.5 h-1.5 rounded-full", paused ? "bg-amber-500" : "bg-emerald-500 bpulse")}/>
-          <span className="text-[10px] uppercase font-mono tracking-[0.2em] opacity-70">Live feed</span>
+              title="Live feed"
+              className={classNames(
+                "w-full flex items-center justify-between py-2",
+                collapsed ? "px-2.5 sm:px-3 border-0 sm:border-b sm:border-black/5 sm:dark:border-white/5"
+                          : "px-3 border-b border-black/5 dark:border-white/5"
+              )}>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={classNames("w-1.5 h-1.5 rounded-full shrink-0", paused ? "bg-amber-500" : "bg-emerald-500 bpulse")}/>
+          {/* Always show a label — chevron alone is too ambiguous on phones.
+              "FEED" fits under our narrow 92px chip; the full "Live feed"
+              takes over on sm+. */}
+          <span className="text-[10px] uppercase font-mono tracking-[0.2em] opacity-70 truncate sm:hidden">Feed</span>
+          <span className="text-[10px] uppercase font-mono tracking-[0.2em] opacity-70 truncate hidden sm:inline">Live feed</span>
         </div>
         <div className="flex items-center gap-1.5">
           {!collapsed && (
@@ -679,10 +696,9 @@ function App() {
   const [animIntensity, setAnimIntensity] = useState(TWEAK_DEFAULTS.animationIntensity);
 
   // Data
-  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], wikiFlashes:[], iss:null, wikiRate:0, sats:[], satTLEs:[], ships:[] });
+  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], iss:null, sats:[], satTLEs:[], ships:[] });
   const [kp, setKp] = useState(null);
   const [ticker, setTicker] = useState([]);
-  const wikiBufRef = useRef([]);
 
   // Live feed (unified stream of all inbound updates)
   const [feed, setFeed] = useState([]);
@@ -837,39 +853,6 @@ function App() {
     return unsub;
   }, []);
 
-  // Wiki flashes
-  useEffect(() => {
-    let wikiSample = 0;
-    const unsub = subscribeWikiEdits(edit => {
-      const cc = edit.wiki?.slice(0,2).toUpperCase();
-      const pt = COUNTRY_POINTS[cc];
-      if (!pt) return;
-      wikiBufRef.current.push({ lon: pt[0] + (Math.random()-0.5)*6, lat: pt[1] + (Math.random()-0.5)*4, t: performance.now() });
-      // Filter out non-article edits (Commons file uploads, meta pages, talk, user pages)
-      // and bots. Namespace 0 = main article content.
-      const isArticle = edit.namespace === 0 || (edit.namespace == null && !edit.title?.includes(':'));
-      const isCommons = edit.wiki === 'commonswiki' || edit.wiki === 'metawiki' || edit.wiki === 'wikidatawiki';
-      // Sample 1 in ~25 valid content edits
-      wikiSample++;
-      if (wikiSample % 25 === 0 && !edit.bot && isArticle && !isCommons) {
-        pushFeed([{
-          key: 'w:'+edit.id+':'+wikiSample,
-          layer:'wiki', time: edit.time || Date.now(),
-          title: edit.title,
-          sub: `${edit.wiki.replace('wiki','')} · ${edit.user || 'anon'}`,
-          coords: [pt[0], pt[1]],
-        }]);
-      }
-    });
-    const tick = setInterval(() => {
-      const now = performance.now();
-      wikiBufRef.current = wikiBufRef.current.filter(w => now - w.t < 1500);
-      // Count last 60s (approximate)
-      setData(d => ({...d, wikiFlashes: [...wikiBufRef.current], wikiRate: Math.round(wikiBufRef.current.length*40) }));
-    }, 200);
-    return () => { unsub?.(); clearInterval(tick); };
-  }, []);
-
   // Build locate targets
   const targets = useMemo(() => {
     const out = [];
@@ -948,18 +931,33 @@ function App() {
         />
       </div>
 
-      {/* Top bar */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex items-start justify-between gap-3 pointer-events-none flex-wrap">
-        <div className="flex items-center gap-2 pointer-events-auto min-w-0 flex-wrap">
-          <div className="glass rounded-full pl-3 pr-4 py-2 flex items-center gap-2 shrink-0">
+      {/* Top bar — mobile-first. On phones it stacks:
+            row 1: brand + actions (search / layers / theme)
+            row 2: compact stat pill (only top 3 stats shown at this breakpoint)
+          On sm+ everything lives on one line. */}
+      <div className="absolute top-3 sm:top-4 left-3 sm:left-4 right-3 sm:right-4 z-10 flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-2 sm:gap-3 pointer-events-none">
+        <div className="flex items-center justify-between gap-2 pointer-events-auto min-w-0 sm:flex-wrap order-1">
+          <div className="glass rounded-full pl-3 pr-3 sm:pr-4 py-2 flex items-center gap-2 shrink-0">
             <div className="w-2 h-2 rounded-full bg-accent-500 bpulse"/>
             <span className="font-mono text-[11px] tracking-[0.2em] uppercase">God's Eye</span>
           </div>
-          <div className="min-w-0 max-w-full overflow-hidden">
+          {/* Actions sit next to the brand on phones so they don't get pushed
+              off-screen; on sm+ they detach to the right via the outer flex. */}
+          <div className="flex items-center gap-1.5 sm:hidden">
+            <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
+            <LayersPopover layers={layers} setLayers={setLayers} theme={theme}/>
+            <ThemeToggle theme={theme} onChange={setTheme}/>
+          </div>
+          <div className="min-w-0 max-w-full overflow-hidden hidden sm:block">
             <StatBar data={data} kp={kp}/>
           </div>
         </div>
-        <div className="flex items-center gap-2 pointer-events-auto">
+        {/* Phone-only stat pill on its own row */}
+        <div className="sm:hidden pointer-events-auto order-2 min-w-0 max-w-full overflow-hidden">
+          <StatBar data={data} kp={kp}/>
+        </div>
+        {/* Desktop action cluster (hidden on mobile — duplicated above) */}
+        <div className="hidden sm:flex items-center gap-2 pointer-events-auto order-3">
           <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
           <LayersPopover layers={layers} setLayers={setLayers} theme={theme}/>
           <ThemeToggle theme={theme} onChange={setTheme}/>
@@ -973,8 +971,8 @@ function App() {
         </div>
       )}
 
-      {/* Live Feed — bottom-left */}
-      <div className="absolute top-20 left-4 z-10 pointer-events-auto">
+      {/* Live Feed — tucked below the mobile stat row, standard top-20 on sm+ */}
+      <div className="absolute top-28 sm:top-20 left-3 sm:left-4 z-10 pointer-events-auto">
         <LiveFeed
           feed={feed}
           paused={feedPaused}
