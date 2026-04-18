@@ -266,6 +266,7 @@ function Globe({
   const gridRef = useRef(null);
   const countriesRef = useRef(null);        // internal country borders (mesh) — drawing only
   const countryFeaturesRef = useRef(null);  // NE admin_0 features — hit-test (has names)
+  const statesRef = useRef(null);           // NE admin_1 state/province lines (zoom ≥ 2.5)
   const riversRef = useRef(null);           // Natural Earth rivers 50m
   const lakesRef = useRef(null);            // Natural Earth lakes 50m
   const citiesRef = useRef(null);           // Natural Earth populated places 50m
@@ -294,6 +295,14 @@ function Globe({
         const hc = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/110m/cultural/ne_110m_admin_0_countries_lakes.json');
         countryFeaturesRef.current = hc.features || [];
       } catch (e) { console.warn('country hit-data load fail', e); }
+
+      // State / province lines (admin_1). Lines-only file so there's no fill
+      // overhead. Drawn only at zoom ≥ 2.5 — at globe view they'd just be noise.
+      try {
+        const s = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/50m/cultural/ne_50m_admin_1_states_provinces_lines.json');
+        statesRef.current = s;
+        dirtyBase.current = true;
+      } catch (e) { console.warn('states load fail', e); }
 
       // Rivers, lakes, cities — Natural Earth via jsdelivr-hosted geojson.
       try {
@@ -714,6 +723,17 @@ function Globe({
           bctx.setLineDash([]);
         }
 
+        // State / province lines — fade in over zoom 2.5 → 4.
+        if (statesRef.current && zoomB >= 2.5) {
+          const sa = Math.min(0.4, (zoomB - 2.5) * 0.3 + 0.1);
+          bctx.beginPath(); path(statesRef.current);
+          bctx.strokeStyle = isDark ? `rgba(148,163,184,${sa})` : `rgba(71,85,105,${sa})`;
+          bctx.lineWidth = 0.4;
+          bctx.setLineDash([1, 2]);
+          bctx.stroke();
+          bctx.setLineDash([]);
+        }
+
         // Rivers — zoom ≥ 1.5. Thin cyan hairlines.
         if (riversRef.current && zoomB >= 1.5) {
           const ra = Math.min(0.65, 0.15 + (zoomB - 1.5) * 0.3);
@@ -914,16 +934,32 @@ function Globe({
         octx.restore();
       };
 
-      // Flights — spatial decimation. Bin every flight by a ~zoom-scaled screen
-      // cell; draw ONE real plane per occupied bin and skip the rest. This
-      // replaces the old density-tile approach that painted ugly numbered
-      // rectangles across the map. Natural overdraw in dense regions reads as
-      // density without blocking the globe.
+      // Flights — spatial decimation. One real plane per screen bin, skip the
+      // rest. Bin size scales with zoom; at low zoom we want *fewer, smaller*
+      // planes so European airspace doesn't turn into an opaque dogpile, and
+      // at high zoom we want many individual aircraft visible.
+      //
+      //   zoom  ≤ 1     → 26px bin, 0.55 scale   (world view: hints, not mass)
+      //   zoom  1 – 2   → ramp down to 14px, 0.75 scale
+      //   zoom  2 – 4   → 11-ish px, 0.9 scale
+      //   zoom  ≥ 4     → 9px, 1.0 scale         (approach view: real icons)
       if (layers.flights && data.flights) {
-        const flightCell = Math.max(10, 16 / zoom);
+        const flightCell =
+          zoom <= 1   ? 26 :
+          zoom <= 2   ? 26 - (zoom - 1) * 12 :         // 26 → 14
+          zoom <= 4   ? 14 - (zoom - 2) * 1.5 :        // 14 → 11
+                         Math.max(9, 14 / zoom);
+        const scale =
+          zoom <= 1   ? 0.55 :
+          zoom <= 2   ? 0.55 + (zoom - 1) * 0.2 :      // 0.55 → 0.75
+          zoom <= 3   ? 0.75 + (zoom - 2) * 0.15 :     // 0.75 → 0.9
+                         Math.min(1.0, 0.9 + (zoom - 3) * 0.05);
+        // Prefer higher-altitude aircraft per bin — cruising airliners read
+        // better than low-flying spotter planes, and a consistent altitude
+        // floor makes the visible fleet feel coherent.
+        const sorted = data.flights.slice().sort((a, b) => (b.alt || 0) - (a.alt || 0));
         const seenFlight = new Set();
-        const scale = zoom >= 2 ? 0.95 : zoom >= 1.2 ? 0.85 : 0.75;
-        for (const f of data.flights) {
+        for (const f of sorted) {
           if (!visibleOn(projection, f.lon, f.lat)) continue;
           const pt = projection([f.lon, f.lat]); if (!pt) continue;
           const [px, py] = pt;
@@ -931,7 +967,7 @@ function Globe({
           if (seenFlight.has(k)) continue;
           seenFlight.add(k);
           drawPlane(px, py, f.hdg, scale);
-          pushHit(px, py, Math.max(7, flightCell * 0.5), 'flight', f);
+          pushHit(px, py, Math.max(7, flightCell * 0.45), 'flight', f);
         }
       }
 
@@ -1074,19 +1110,6 @@ function Globe({
             octx.fillText('ISS', pt[0]+14, pt[1]+3);
             pushHit(pt[0], pt[1], 16, 'iss', data.iss);
           }
-        }
-      }
-
-      // Wiki flashes
-      if (layers.wiki && data.wikiFlashes) {
-        for (const w of data.wikiFlashes) {
-          const pt = projection([w.lon, w.lat]); if (!pt) continue;
-          if (!visibleOn(projection, w.lon, w.lat)) continue;
-          const age = Math.max(0, (now - w.t)/1400);
-          if (age > 1) continue;
-          octx.beginPath(); octx.arc(pt[0], pt[1], Math.max(0, 2 + age*14), 0, Math.PI*2);
-          octx.strokeStyle = `rgba(96,165,250,${0.7*(1-age)})`; octx.lineWidth = 1;
-          octx.stroke();
         }
       }
 

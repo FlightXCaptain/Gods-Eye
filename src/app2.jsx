@@ -1,7 +1,7 @@
 /* God's Eye — app shell v2. Glass, minimal, time slider. */
 /* globals React, ReactDOM, Globe, fetchQuakes, fetchISS, fetchFlights, fetchEONET,
-           fetchKp, fetchAurora, fetchWeather, subscribeWikiEdits, fetchHN,
-           fetchTsunamis, COUNTRY_POINTS */
+           fetchKp, fetchAurora, fetchTsunamis, fetchSatellites, propagateSats,
+           loadSatcat */
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -279,7 +279,6 @@ function LayersPopover({ layers, setLayers, theme }) {
     ['quakes','Seismic',  'quake',   '#fb923c'],
     ['events','Natural events', 'fire', '#ef4444'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
-    ['wiki','Signal',     'wiki',    '#60a5fa'],
     ['tsunamis','Tsunami archive', 'tsunami', '#22d3ee'],
   ];
   return (
@@ -348,7 +347,6 @@ function StatBar({ data, kp }) {
   const quakeCount = data.quakes?.length || 0;
   const eventCount = data.events?.length || 0;
   const satCount = data.sats?.length || 0;
-  const wikiPerMin = data.wikiRate || 0;
   const items = [
     { label: 'Flights',      short: 'Flights',       val: flightCount.toLocaleString(), glyph: 'flight', color: '#7dd3fc', title: 'Aircraft currently airborne (ADS-B via airplanes.live)' },
     { label: 'Ships',        short: 'Ships',         val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
@@ -356,7 +354,6 @@ function StatBar({ data, kp }) {
     { label: 'Earthquakes',  short: 'Quakes',        val: quakeCount,                   glyph: 'quake',  color: '#fb923c', title: 'Seismic events in the last 24h (USGS)' },
     { label: 'Natural events', short: 'Nature',      val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Active storms, wildfires, volcanoes, ice (NASA EONET)' },
     { label: 'Geomagnetic',  short: 'Kp',            val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
-    { label: 'Wiki edits/min', short: 'Edits/m',     val: wikiPerMin,                   glyph: 'wiki',   color: '#60a5fa', title: 'Wikipedia edits per minute, globally (Wikimedia stream)' },
   ];
   return (
     <div className="glass rounded-full pl-2 pr-3 py-1.5 flex items-center gap-3 text-xs relative overflow-x-auto scrollbar-none max-w-full">
@@ -679,10 +676,9 @@ function App() {
   const [animIntensity, setAnimIntensity] = useState(TWEAK_DEFAULTS.animationIntensity);
 
   // Data
-  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], wikiFlashes:[], iss:null, wikiRate:0, sats:[], satTLEs:[], ships:[] });
+  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], iss:null, sats:[], satTLEs:[], ships:[] });
   const [kp, setKp] = useState(null);
   const [ticker, setTicker] = useState([]);
-  const wikiBufRef = useRef([]);
 
   // Live feed (unified stream of all inbound updates)
   const [feed, setFeed] = useState([]);
@@ -835,39 +831,6 @@ function App() {
       setData(d => ({...d, ships: list }));
     });
     return unsub;
-  }, []);
-
-  // Wiki flashes
-  useEffect(() => {
-    let wikiSample = 0;
-    const unsub = subscribeWikiEdits(edit => {
-      const cc = edit.wiki?.slice(0,2).toUpperCase();
-      const pt = COUNTRY_POINTS[cc];
-      if (!pt) return;
-      wikiBufRef.current.push({ lon: pt[0] + (Math.random()-0.5)*6, lat: pt[1] + (Math.random()-0.5)*4, t: performance.now() });
-      // Filter out non-article edits (Commons file uploads, meta pages, talk, user pages)
-      // and bots. Namespace 0 = main article content.
-      const isArticle = edit.namespace === 0 || (edit.namespace == null && !edit.title?.includes(':'));
-      const isCommons = edit.wiki === 'commonswiki' || edit.wiki === 'metawiki' || edit.wiki === 'wikidatawiki';
-      // Sample 1 in ~25 valid content edits
-      wikiSample++;
-      if (wikiSample % 25 === 0 && !edit.bot && isArticle && !isCommons) {
-        pushFeed([{
-          key: 'w:'+edit.id+':'+wikiSample,
-          layer:'wiki', time: edit.time || Date.now(),
-          title: edit.title,
-          sub: `${edit.wiki.replace('wiki','')} · ${edit.user || 'anon'}`,
-          coords: [pt[0], pt[1]],
-        }]);
-      }
-    });
-    const tick = setInterval(() => {
-      const now = performance.now();
-      wikiBufRef.current = wikiBufRef.current.filter(w => now - w.t < 1500);
-      // Count last 60s (approximate)
-      setData(d => ({...d, wikiFlashes: [...wikiBufRef.current], wikiRate: Math.round(wikiBufRef.current.length*40) }));
-    }, 200);
-    return () => { unsub?.(); clearInterval(tick); };
   }, []);
 
   // Build locate targets
