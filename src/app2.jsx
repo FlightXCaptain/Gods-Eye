@@ -393,7 +393,7 @@ function StatBar({ data, kp }) {
     { label: 'Geomagnetic',  short: 'Kp',      shortMobile: 'Kp',  val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
   ];
   return (
-    <div className="glass rounded-full pl-2 pr-2.5 sm:pr-3 py-1.5 flex items-center gap-2 sm:gap-3 text-xs relative overflow-x-auto scrollbar-none max-w-full">
+    <div className="glass rounded-full pl-2 pr-2.5 sm:pr-3 py-1.5 flex items-center gap-2 sm:gap-3 text-xs relative overflow-x-auto scrollbar-none max-w-full tk-mask">
       {items.map((it, i) => (
         <React.Fragment key={it.label}>
           {i > 0 && <div className="w-px h-3 bg-current opacity-10 shrink-0"/>}
@@ -415,7 +415,7 @@ function Dossier({ item, onClose }) {
   if (!item) return null;
   const layer = item._layer || item.kind;
   return (
-    <div className="glass-strong rounded-2xl w-[320px] overflow-hidden">
+    <div className="glass-strong rounded-2xl w-[min(320px,calc(100vw-24px))] max-h-[calc(100vh-8rem)] overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-black/5 dark:border-white/5">
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-accent-500 bpulse"/>
@@ -434,7 +434,7 @@ function Dossier({ item, onClose }) {
         </div>
         <button onClick={onClose} className="opacity-50 hover:opacity-100"><Icon name="x" className="w-3.5 h-3.5"/></button>
       </div>
-      <div className="p-4 space-y-3">
+      <div className="p-4 space-y-3 overflow-y-auto scroll">
         {layer === 'iss' && <>
           <div className="text-lg">ISS · ZARYA</div>
           <KV k="Altitude" v={`${item.alt?.toFixed(1)} km`}/>
