@@ -17,6 +17,10 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 const SHIPS = new Map();         // mmsi -> ship record
 const SUBSCRIBERS = new Set();   // Set<(type, payload) => void>
 const STALE_MS = 15 * 60 * 1000;
+// Per-vessel position history for client trail rendering. 10 points = a
+// tidy tail that reads as motion without dominating dense shipping lanes.
+const TRACK_MAX = 10;
+const TRACK_MIN_DLL = 0.005;
 
 let ws = null;
 let reconnectTimer = null;
@@ -84,6 +88,13 @@ function connectUpstream() {
       const pr = m.Message?.PositionReport || {};
       const lat = pr.Latitude, lon = pr.Longitude;
       if (!isFinite(lat) || !isFinite(lon)) return;
+      // Append to track if the vessel has actually moved.
+      if (!prev.track) prev.track = [];
+      const last = prev.track[prev.track.length - 1];
+      if (!last || Math.abs(last[0] - lon) > TRACK_MIN_DLL || Math.abs(last[1] - lat) > TRACK_MIN_DLL) {
+        prev.track.push([lon, lat]);
+        while (prev.track.length > TRACK_MAX) prev.track.shift();
+      }
       prev.lat = lat;
       prev.lon = lon;
       prev.cog = pr.Cog;
