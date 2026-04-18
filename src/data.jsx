@@ -14,10 +14,12 @@ async function safeFetch(url, opts = {}, timeoutMs = 15000) {
 }
 
 async function fetchQuakes() {
-  // Use the M2.5+ daily feed by default — filters out microquakes that are
-  // not perceptible and overwhelm the globe with noise. Callers can still
-  // post-filter by magnitude for the UI slider.
-  const j = await safeFetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson');
+  // 30-day M2.5+ feed from USGS so the time-slider can scrub back a full
+  // month of seismic activity. Filters microquakes that aren't perceptible
+  // and would overwhelm the globe. USGS serves this with its own CDN
+  // caching headers, so repeated loads across browsers hit their edge
+  // rather than our proxy.
+  const j = await safeFetch('https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_month.geojson');
   if (!j?.features) return [];
   return j.features.map(f => ({
     id: f.id,
@@ -106,7 +108,10 @@ async function fetchFlights() {
 }
 
 async function fetchEONET() {
-  const j = await safeFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=200');
+  // 30-day window covering both currently-active events and anything that
+  // resolved in the last month. status=all includes closed events so the
+  // time-slider can scrub through history.
+  const j = await safeFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=all&days=30&limit=1000');
   if (!j?.events) return [];
   const out = [];
   for (const e of j.events) {

@@ -450,12 +450,16 @@ function Dossier({ item, onClose }) {
           <KV k="Position" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
         </>}
         {layer === 'flight' && <>
-          <div className="text-lg">{item.callsign || item.reg}</div>
+          <div className="flex items-baseline gap-2">
+            <div className="text-lg">{item.callsign || item.reg}</div>
+            {item.mil && <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-500">MIL</span>}
+          </div>
           <KV k="Aircraft" v={item.desc || item.type || '—'}/>
           <KV k="Reg" v={item.reg || '—'}/>
-          <KV k="Altitude" v={item.alt ? `${item.alt.toLocaleString()} ft` : '—'}/>
+          <KV k="Altitude" v={typeof item.alt === 'number' ? `${item.alt.toLocaleString()} ft` : (item.alt || '—')}/>
           <KV k="Speed" v={item.vel ? `${Math.round(item.vel)} kt` : '—'}/>
           <KV k="Heading" v={item.hdg ? `${Math.round(item.hdg)}°` : '—'}/>
+          {item.source === 'adsbx-mil' && <div className="text-[10px] opacity-50 font-mono pt-1">Source · ADSBx</div>}
         </>}
         {layer === 'ship' && <>
           <div className="text-lg">{item.name || `MMSI ${item.mmsi}`}</div>
@@ -526,7 +530,9 @@ function KV({ k, v }) {
 
 // Time range slider — compact
 function TimeSlider({ nowCursor, setNowCursor, playing, setPlaying, playSpeed, setPlaySpeed }) {
-  const WINDOW = 24*3600*1000;
+  // 30-day scrub window. USGS 2.5_month and EONET status=all&days=30 both
+  // return this range, so the slider maps 1:1 onto historical data.
+  const WINDOW = 30*24*3600*1000;
   const NOW = Date.now();
   const MIN = NOW - WINDOW;
   const t = nowCursor;
@@ -580,13 +586,21 @@ function TimeSlider({ nowCursor, setNowCursor, playing, setPlaying, playSpeed, s
       </div>
 
       <div className="flex items-center gap-0.5 shrink-0">
-        {[60, 300, 1800, 3600].map(sp => (
+        {/* Playback speeds scaled for the 30-day window. "1h/s" scrubs one
+            real hour every wall-clock second (30 days ≈ 12 min). "5d/s" is
+            the fast-review speed (30 days ≈ 6 s). */}
+        {[
+          { sp: 3600,   label: '1h/s' },
+          { sp: 14400,  label: '4h/s' },
+          { sp: 86400,  label: '1d/s' },
+          { sp: 432000, label: '5d/s' },
+        ].map(({ sp, label }) => (
           <button key={sp} onClick={()=>setPlaySpeed(sp)}
             className={classNames(
               "text-[9px] font-mono px-1 py-0.5 rounded tabular-nums transition",
               playSpeed===sp ? "bg-accent-500/20 text-accent-500" : "opacity-40 hover:opacity-80"
             )}>
-            {sp===60?'1×':sp===300?'5×':sp===1800?'30×':'60×'}
+            {label}
           </button>
         ))}
         {!isLive && (
@@ -773,7 +787,7 @@ function App() {
   // Time cursor
   const [nowCursor, setNowCursor] = useState(Date.now());
   const [playing, setPlaying] = useState(false);
-  const [playSpeed, setPlaySpeed] = useState(300); // multiplier
+  const [playSpeed, setPlaySpeed] = useState(14400); // multiplier — "4h/s"
   // When live, keep cursor at Date.now()
   useEffect(() => {
     if (playing) return;
@@ -970,7 +984,10 @@ function App() {
   }, []);
   const [tweaks, setTweaks] = useState(false);
 
-  // Filter data by time cursor (quakes, events)
+  // Filter data by time cursor (quakes, events). 30-day lookback now; show
+  // anything that occurred within the 24-hour window ending at the cursor —
+  // that's the "what was happening at this point in the last month" view
+  // rather than a running cumulative display.
   const filteredData = useMemo(() => {
     const cutoff = nowCursor;
     const start = cutoff - 24*3600*1000;
@@ -979,7 +996,9 @@ function App() {
       quakes: (data.quakes||[]).filter(q => q.time <= cutoff && q.time >= start),
       events: (data.events||[]).filter(e => {
         const t = e.time ? new Date(e.time).getTime() : 0;
-        return t <= cutoff;
+        // Events are multi-day; show if their most recent observation is at
+        // or before the cursor AND within the 30-day window.
+        return t <= cutoff && t >= cutoff - 30*24*3600*1000;
       }),
     };
   }, [data, nowCursor]);
