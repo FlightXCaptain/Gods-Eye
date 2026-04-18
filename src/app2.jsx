@@ -275,6 +275,16 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <circle cx="7" cy="7" r="4" stroke={color} strokeWidth="0.8" opacity="0.4"/>
         </svg>
       );
+    case 'camera':
+      // Compact camera silhouette: body + lens bump + viewfinder nub.
+      return (
+        <svg {...props}>
+          <rect x="2" y="5" width="10" height="6.5" rx="1" fill={color}/>
+          <rect x="5" y="3.5" width="4" height="1.8" fill={color}/>
+          <circle cx="7" cy="8.3" r="1.8" fill="rgba(0,0,0,0.55)"/>
+          <circle cx="7" cy="8.3" r="0.8" fill={color} opacity="0.85"/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -290,6 +300,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) 
     ['events','Natural events', 'fire', '#ef4444'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
     ['wind','Wind flow',  'aurora',  '#60a5fa'],
+    ['cameras','Live cameras', 'camera', '#f472b6'],
     ['tsunamis','Tsunami archive', 'tsunami', '#22d3ee'],
   ];
   return (
@@ -456,6 +467,8 @@ function Dossier({ item, onClose }) {
       }
       case 'event':
         return { label: item.title || 'Event', altMeters: 5000 };
+      case 'camera':
+        return { label: item.title || 'Live camera', altMeters: 1200 };
       default:
         return null;
     }
@@ -487,6 +500,7 @@ function Dossier({ item, onClose }) {
               : layer === 'city' ? 'City'
               : layer === 'country' ? 'Country'
               : layer === 'lake' ? 'Hydrography'
+              : layer === 'camera' ? 'Live camera'
               : 'Object'}
           </span>
         </div>
@@ -575,6 +589,33 @@ function Dossier({ item, onClose }) {
           <KV k="Clicked" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
           {item.name !== 'Unnamed lake' && (
             <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+          )}
+        </>}
+        {layer === 'camera' && <>
+          <div className="text-lg">{item.title}</div>
+          {item.category && (
+            <div className="text-sm opacity-70 capitalize">{item.category}{item.source ? ` · ${item.source}` : ''}</div>
+          )}
+          {/* Thumbnail if provider exposes one. Sized to fit the 320-wide
+              dossier comfortably; hide on load failure so broken hosts don't
+              show a stock browser placeholder. */}
+          {item.thumbnailUrl && (
+            <div className="-mx-1 rounded-xl overflow-hidden border border-black/10 dark:border-white/10">
+              <img
+                src={item.thumbnailUrl}
+                alt={item.title}
+                className="w-full h-auto block"
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                onError={(e) => { e.currentTarget.parentElement.style.display = 'none'; }}
+              />
+            </div>
+          )}
+          <KV k="Position" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
+          {item.pageUrl && (
+            <a href={item.pageUrl} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">
+              Watch live →
+            </a>
           )}
         </>}
         {hasCoords && diveInMeta && (
@@ -812,7 +853,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, tsunamis:false, wind:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, cameras:true, tsunamis:false, wind:false };
     // Wind layer is force-off across sessions until we retune it. Users who
     // had it enabled before get it turned off on the next load; they can
     // toggle it back on within a session but it won't persist past reload
