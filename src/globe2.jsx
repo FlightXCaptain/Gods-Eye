@@ -1347,78 +1347,11 @@ function Globe({
         }
       }
 
-      // Satellites — render as a swarm of dots; GEO belt drawn as single arc annotation
+      // Satellites — render all (GEO + LEO/MEO) as individual icons. The old
+      // "GEO belt as arc annotation" was removed at user request. GEO sats
+      // still render, just as regular sat icons like their lower-orbit kin.
       if (layers.sats && data.sats) {
-        // Split into GEO (high alt, near-equatorial) vs LEO/MEO
-        const geoSats = [], otherSats = [];
-        for (const s of data.sats) {
-          if ((s.alt || 0) > 30000 && Math.abs(s.lat) < 12) geoSats.push(s);
-          else otherSats.push(s);
-        }
-
-        // GEO belt: draw as a continuous translucent ring at altitude, with a single label.
-        // Only break it into individual dots when heavily zoomed in.
-        if (geoSats.length) {
-          if (zoom < 2.2) {
-            // Resample the 181-point belt only when rotation or scale has moved
-            // enough that the cached geometry is visibly stale. Threshold of 0.25°
-            // lon + 0.25° lat + 0.5px scale keeps the belt pixel-accurate during
-            // slow auto-rotate while skipping ~180 projection calls per frame
-            // during static viewing.
-            const cache = geoBeltCacheRef.current;
-            const rLon = rotRef.current[0], rLat = rotRef.current[1], sc = scaleRef.current;
-            const stale = cache.belt === null
-              || Math.abs((cache.rotLon ?? 0) - rLon) > 0.25
-              || Math.abs((cache.rotLat ?? 0) - rLat) > 0.25
-              || Math.abs((cache.scale ?? 0) - sc) > 0.5;
-            let belt;
-            if (stale) {
-              const sample = 180;
-              belt = [];
-              for (let i = 0; i <= sample; i++) {
-                const lon = -180 + (360 * i / sample);
-                const pt = projectAtAltitude(projection, lon, 0, 35786);
-                if (pt && visibleOn(projection, lon, 0)) belt.push(pt);
-                else belt.push(null);
-              }
-              geoBeltCacheRef.current = { belt, rotLon: rLon, rotLat: rLat, scale: sc };
-            } else {
-              belt = cache.belt;
-            }
-            octx.beginPath();
-            let started = false;
-            for (const p of belt) {
-              if (!p) { started = false; continue; }
-              if (!started) { octx.moveTo(p[0], p[1]); started = true; }
-              else octx.lineTo(p[0], p[1]);
-            }
-            octx.strokeStyle = isDark ? 'rgba(217,70,239,0.28)' : 'rgba(217,70,239,0.35)';
-            octx.lineWidth = 1;
-            octx.setLineDash([2, 3]);
-            octx.stroke();
-            octx.setLineDash([]);
-
-            // Small label near the visible right edge of the belt
-            let labelPt = null;
-            for (let i = belt.length - 1; i >= 0; i--) { if (belt[i]) { labelPt = belt[i]; break; } }
-            if (labelPt) {
-              octx.font = '500 9px Geist Mono, monospace';
-              octx.fillStyle = isDark ? 'rgba(217,70,239,0.75)' : 'rgba(168,85,247,0.8)';
-              octx.fillText(`GEO belt · ${geoSats.length}`, labelPt[0] + 6, labelPt[1] + 3);
-            }
-            // Hit area: thin strip along the belt — use midpoint for a single cluster hit
-            const mid = belt[Math.floor(belt.length/2)];
-            if (mid) pushHit(mid[0], mid[1], 6, 'geo-belt', { kind:'cluster', layer:'sat', items: geoSats, count: geoSats.length, lon: 0, lat: 0, isGeo: true });
-          } else {
-            // Zoomed in — GEO sats as small sat icons
-            for (const s of geoSats) {
-              const pt = projectAtAltitude(projection, s.lon, s.lat, s.alt || 0);
-              if (!pt) continue;
-              iconSat(octx, pt[0], pt[1], 6, 'rgba(217,70,239,0.9)');
-              pushHit(pt[0], pt[1], 7, 'sat', s);
-            }
-          }
-        }
+        const otherSats = data.sats;
 
         // Other sats (LEO/MEO): LOD — full sat icon when sparse, dot when dense.
         const sPts = [];
