@@ -975,12 +975,11 @@ function Globe({
       const zoom = scaleRef.current / baseScale;
       const binPx = Math.max(12, 42 / zoom);
 
-      // Earthquakes — M2.5+ only (filtered upstream). Render scaled by magnitude:
-      //   M5+   → full pulsing crosshair with label
-      //   M4-5  → full crosshair, no label
-      //   M3-4  → compact crosshair
-      //   M<3   → tiny dim dot (background context)
-      // No scary cluster halos.
+      // Earthquakes. Magnitude threshold filtering happens in App's
+      // filteredData so by the time we render, every quake is "above the
+      // user's chosen floor." We no longer paint magnitude labels on the map
+      // (too noisy — dossier + hover tooltip carry the number). Icons are
+      // roughly half the size they used to be so dense regions read cleanly.
       if (layers.quakes && data.quakes) {
         const visibleQuakes = data.quakes.filter(q => {
           const age = (nowCursor - q.time) / (24*3600*1000);
@@ -994,29 +993,25 @@ function Globe({
           const col = mag >= 5 ? '#f43f5e' : mag >= 4 ? '#fb923c' : mag >= 3 ? '#fbbf24' : '#d97706';
 
           if (mag >= 5) {
-            // Significant — pulse + epicenter + label
+            // Significant — still keep the pulse, just smaller.
             const phase = ((now/1000) + (q.id?.charCodeAt(0) || 0))%1.8/1.8;
-            const sz = 16 + (mag - 5) * 2.2;
+            const sz = 9 + (mag - 5) * 1.4;
             octx.beginPath();
-            octx.arc(px, py, sz*0.7 + phase*18*animationIntensity, 0, Math.PI*2);
-            octx.strokeStyle = `rgba(244,63,94,${0.5*(1-phase)*(1-age*0.6)})`;
-            octx.lineWidth = 1.2; octx.stroke();
+            octx.arc(px, py, sz*0.7 + phase*10*animationIntensity, 0, Math.PI*2);
+            octx.strokeStyle = `rgba(244,63,94,${0.45*(1-phase)*(1-age*0.6)})`;
+            octx.lineWidth = 1; octx.stroke();
             iconQuake(octx, px, py, sz, col, isDark);
-            // Magnitude label
-            octx.font = '600 11px Geist Mono, monospace';
-            octx.fillStyle = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.92)';
-            octx.fillText(`M${mag.toFixed(1)}`, px + sz*0.8 + 3, py + 4);
-            pushHit(px, py, sz, 'quake', q);
+            pushHit(px, py, Math.max(sz, 8), 'quake', q);
           } else if (mag >= 4) {
-            iconQuake(octx, px, py, 13, col, isDark);
-            pushHit(px, py, 11, 'quake', q);
-          } else if (mag >= 3) {
-            iconQuake(octx, px, py, 10, col, isDark);
-            pushHit(px, py, 9, 'quake', q);
-          } else {
-            // M2.5-3 — still clearly an epicenter
-            iconQuake(octx, px, py, 8, isDark ? 'rgba(251,146,60,0.7)' : 'rgba(217,119,6,0.75)', isDark);
+            iconQuake(octx, px, py, 7, col, isDark);
             pushHit(px, py, 7, 'quake', q);
+          } else if (mag >= 3) {
+            iconQuake(octx, px, py, 6, col, isDark);
+            pushHit(px, py, 6, 'quake', q);
+          } else {
+            // M<3 — minimum tappable hit target even though the glyph is tiny.
+            iconQuake(octx, px, py, 5, isDark ? 'rgba(251,146,60,0.7)' : 'rgba(217,119,6,0.75)', isDark);
+            pushHit(px, py, 6, 'quake', q);
           }
         }
       }

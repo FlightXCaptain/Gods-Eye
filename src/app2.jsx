@@ -279,7 +279,7 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
   }
 };
 
-function LayersPopover({ layers, setLayers, theme }) {
+function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) {
   const [open, setOpen] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
@@ -303,15 +303,33 @@ function LayersPopover({ layers, setLayers, theme }) {
             <div className="text-[10px] uppercase font-mono opacity-50 mb-2 tracking-wider">Layers</div>
             <div className="space-y-0.5">
               {items.map(([k,label,glyph,col])=>(
-                <label key={k} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer">
-                  <input type="checkbox" checked={!!layers[k]}
-                         onChange={e=>setLayers(x=>({...x,[k]:e.target.checked}))}
-                         className="accent-accent-500"/>
-                  <span className="shrink-0 w-4 h-4 flex items-center justify-center" style={{ color: col }}>
-                    <GlyphSVG kind={glyph} color={col} size={14}/>
-                  </span>
-                  <span className="text-sm flex-1">{label}</span>
-                </label>
+                <React.Fragment key={k}>
+                  <label className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer">
+                    <input type="checkbox" checked={!!layers[k]}
+                           onChange={e=>setLayers(x=>({...x,[k]:e.target.checked}))}
+                           className="accent-accent-500"/>
+                    <span className="shrink-0 w-4 h-4 flex items-center justify-center" style={{ color: col }}>
+                      <GlyphSVG kind={glyph} color={col} size={14}/>
+                    </span>
+                    <span className="text-sm flex-1">{label}</span>
+                    {k === 'quakes' && (
+                      <span className="font-mono text-[10px] tabular-nums text-accent-500 shrink-0">
+                        M{seismicMin.toFixed(1)}+
+                      </span>
+                    )}
+                  </label>
+                  {/* Seismic magnitude floor — only the quake layer gets a
+                      secondary control. Placed directly below the toggle so
+                      the visual grouping ("this modifies THAT") is obvious. */}
+                  {k === 'quakes' && layers.quakes && (
+                    <div className="px-2 pb-1.5 pt-0.5">
+                      <input type="range" min="0" max="9" step="0.5"
+                             value={seismicMin}
+                             onChange={e=>setSeismicMin(parseFloat(e.target.value))}
+                             className="ak w-full" />
+                    </div>
+                  )}
+                </React.Fragment>
               ))}
             </div>
 
@@ -725,6 +743,14 @@ function App() {
     localStorage.setItem('ge-theme', theme);
   }, [theme]);
 
+  // Seismic magnitude floor — hides microquakes globally; bound to a slider
+  // in the Layers popover. Default 5 matches "felt-widely-significant".
+  const [seismicMin, setSeismicMin] = useState(() => {
+    try { const v = localStorage.getItem('ge-seismic-min'); return v == null ? 5 : parseFloat(v); }
+    catch { return 5; }
+  });
+  useEffect(() => { localStorage.setItem('ge-seismic-min', String(seismicMin)); }, [seismicMin]);
+
   // Layers
   const [layers, setLayers] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
@@ -1013,10 +1039,10 @@ function App() {
     const start = cutoff - 24*3600*1000;
     return {
       ...data,
-      quakes: (data.quakes||[]).filter(q => q.time <= cutoff && q.time >= start),
+      quakes: (data.quakes||[]).filter(q => q.time <= cutoff && q.time >= start && (q.mag || 0) >= seismicMin),
       events: (data.events||[]).filter(e => e.time <= cutoff && e.time >= start),
     };
-  }, [data, nowCursor]);
+  }, [data, nowCursor, seismicMin]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden">
@@ -1062,7 +1088,7 @@ function App() {
               off-screen; on sm+ they detach to the right via the outer flex. */}
           <div className="flex items-center gap-1.5 sm:hidden">
             <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
-            <LayersPopover layers={layers} setLayers={setLayers} theme={theme}/>
+            <LayersPopover layers={layers} setLayers={setLayers} theme={theme} seismicMin={seismicMin} setSeismicMin={setSeismicMin}/>
             <button
               onClick={() => toggleAutoRotate()}
               title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
@@ -1085,7 +1111,7 @@ function App() {
         {/* Desktop action cluster (hidden on mobile — duplicated above) */}
         <div className="hidden sm:flex items-center gap-2 pointer-events-auto order-3">
           <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
-          <LayersPopover layers={layers} setLayers={setLayers} theme={theme}/>
+          <LayersPopover layers={layers} setLayers={setLayers} theme={theme} seismicMin={seismicMin} setSeismicMin={setSeismicMin}/>
           <button
             onClick={() => toggleAutoRotate()}
             title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
