@@ -734,7 +734,14 @@ function App() {
   }, []);
   const toggleAutoRotate = useCallback(() => {
     setAutoRotate(prev => {
-      if (!prev) setZoomOutSignal(s => s + 1);
+      if (!prev) {
+        // Re-enabling: zoom out to default scale AND clear any locked-in
+        // focusTarget. The Globe tick has a `!focusTarget` guard on the
+        // auto-rotate step so a leftover locate target would otherwise
+        // prevent rotation from ever resuming.
+        setZoomOutSignal(s => s + 1);
+        setFocusTarget(null);
+      }
       return !prev;
     });
   }, []);
