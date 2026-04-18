@@ -280,6 +280,9 @@ function Globe({
   // the user clicks the toolbar rotate button (also triggers zoomOutSignal).
   const lastFrameMsRef = useRef(null);
   const AUTO_ROTATE_DEG_PER_SEC = 4;
+  // GEO belt sample cache — reusing the same 181-point polyline across frames
+  // while the view is stationary saves 180 projectAtAltitude calls per RAF.
+  const geoBeltCacheRef = useRef({ belt: null, rotLon: null, rotLat: null, scale: null });
   // Sorted flight list — memoised so the expensive O(n log n) altitude sort
   // runs only when the flight dataset actually refreshes (every ~25s), not
   // on every RAF frame.
@@ -1124,7 +1127,15 @@ function Globe({
           sail:      '#60a5fa',
           other:     isDark ? 'rgba(148,163,184,0.9)' : 'rgba(71,85,105,0.9)',
         };
-        const shipStroke = isDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.8)';
+        // Stroke is the hull's contrast edge against the BACKGROUND. Previously
+        // we had it matching the background colour which made the icon effectively
+        // unbordered — especially painful in light mode where pale-cyan cargo
+        // ships washed out against the pale ocean fill.
+        const shipStroke = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(15,23,42,0.55)';
+        // "Service" vessels use slate-grey which vanishes on the light-mode
+        // ocean tint — patch the palette entry for light mode only.
+        const lightServiceOverride = isDark ? null : 'rgba(51,65,85,0.95)';
+        if (lightServiceOverride) shipColor.service = lightServiceOverride;
         const shipCell = Math.max(7, 11 / zoom);
         const seenShip = new Set();
         const shipScale = zoom >= 2 ? 1.0 : zoom >= 1.2 ? 0.85 : 0.7;
@@ -1172,14 +1183,30 @@ function Globe({
         // Only break it into individual dots when heavily zoomed in.
         if (geoSats.length) {
           if (zoom < 2.2) {
-            // Draw belt as a thin arc using sampled longitudes at lat=0, alt=~35786
-            const sample = 180;
-            const belt = [];
-            for (let i = 0; i <= sample; i++) {
-              const lon = -180 + (360 * i / sample);
-              const pt = projectAtAltitude(projection, lon, 0, 35786);
-              if (pt && visibleOn(projection, lon, 0)) belt.push(pt);
-              else belt.push(null);
+            // Resample the 181-point belt only when rotation or scale has moved
+            // enough that the cached geometry is visibly stale. Threshold of 0.25°
+            // lon + 0.25° lat + 0.5px scale keeps the belt pixel-accurate during
+            // slow auto-rotate while skipping ~180 projection calls per frame
+            // during static viewing.
+            const cache = geoBeltCacheRef.current;
+            const rLon = rotRef.current[0], rLat = rotRef.current[1], sc = scaleRef.current;
+            const stale = cache.belt === null
+              || Math.abs((cache.rotLon ?? 0) - rLon) > 0.25
+              || Math.abs((cache.rotLat ?? 0) - rLat) > 0.25
+              || Math.abs((cache.scale ?? 0) - sc) > 0.5;
+            let belt;
+            if (stale) {
+              const sample = 180;
+              belt = [];
+              for (let i = 0; i <= sample; i++) {
+                const lon = -180 + (360 * i / sample);
+                const pt = projectAtAltitude(projection, lon, 0, 35786);
+                if (pt && visibleOn(projection, lon, 0)) belt.push(pt);
+                else belt.push(null);
+              }
+              geoBeltCacheRef.current = { belt, rotLon: rLon, rotLat: rLat, scale: sc };
+            } else {
+              belt = cache.belt;
             }
             octx.beginPath();
             let started = false;
