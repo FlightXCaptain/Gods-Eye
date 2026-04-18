@@ -85,12 +85,27 @@ const FLIGHT_HOSTS = [
 
 let refreshRunning = false;
 let snapshotTimer = null;
+let adsbxMilTimer = null;
 
-async function safeFetch(url, timeoutMs = 8000) {
+// ADSBx via RapidAPI — the user's plan allows 10 000 queries/month; we
+// target 8 000 with margin for per-instance duplication on Vercel Fluid
+// Compute (a warm second instance doubles the rate briefly during scale-out).
+//
+//   Single-instance math:
+//     poll every 8 min × 60 min/hr × 24 hr × 30 day / 8 min = 5 400 /mo
+//     ≈ 0.65 × 8 000 budget → room for 2 concurrent instances and the
+//     occasional on-demand hex lookup without tripping the quota.
+const ADSBX_MIL_INTERVAL_MS = 8 * 60 * 1000;
+// Mil records stay visible longer than civilian ones to bridge the 8-min
+// poll gap — otherwise they'd drop from the map every 5 min (civilian
+// STALE_MS) and flicker on each refresh.
+const MIL_STALE_MS = 15 * 60 * 1000;
+
+async function safeFetch(url, opts = {}, timeoutMs = 8000) {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch(url, { signal: ctrl.signal });
+    const res = await fetch(url, { ...opts, signal: ctrl.signal });
     clearTimeout(t);
     if (!res.ok) return null;
     return await res.json();
@@ -103,6 +118,47 @@ async function fetchHotspot(la, lo) {
     if (j?.ac?.length) return j.ac;
   }
   return [];
+}
+
+// ADSBx augmentation — global military aircraft feed. Merges into the same
+// FLIGHTS map so they render alongside civilian traffic. Tagged so dossier
+// can surface the source. Runs on its own interval (60 s) to conserve the
+// RapidAPI quota.
+async function refreshAdsbxMil() {
+  const key = process.env.ADSBX_RAPIDAPI_KEY;
+  if (!key) return;
+  const j = await safeFetch('https://adsbexchange-com1.p.rapidapi.com/v2/mil/', {
+    headers: {
+      'x-rapidapi-host': 'adsbexchange-com1.p.rapidapi.com',
+      'x-rapidapi-key': key,
+    },
+  });
+  if (!j?.ac?.length) return;
+  const now = Date.now();
+  for (const a of j.ac) {
+    if (a.lat == null || a.lon == null) continue;
+    const hex = a.hex;
+    if (!hex) continue;
+    const prev = FLIGHTS.get(hex);
+    const track = prev?.track ? prev.track.slice() : [];
+    const last = track[track.length - 1];
+    if (!last || Math.abs(last[0] - a.lon) > TRACK_MIN_DLL || Math.abs(last[1] - a.lat) > TRACK_MIN_DLL) {
+      track.push([a.lon, a.lat]);
+      while (track.length > TRACK_MAX) track.shift();
+    }
+    FLIGHTS.set(hex, {
+      id: hex,
+      callsign: (a.flight || '').trim() || a.r || hex,
+      reg: a.r, type: a.t, desc: a.desc,
+      lon: a.lon, lat: a.lat,
+      alt: typeof a.alt_baro === 'number' ? a.alt_baro : prev?.alt,
+      vel: a.gs, hdg: a.track,
+      kind: 'flight',
+      source: 'adsbx-mil',
+      mil: true,
+      _ts: now,
+    });
+  }
 }
 
 async function refresh() {
@@ -139,10 +195,12 @@ async function refresh() {
     }
     await new Promise(r => setTimeout(r, REQUEST_STAGGER_MS));
   }
-  // Prune stale
-  const cutoff = Date.now() - STALE_MS;
+  // Prune stale — mil records get the longer tolerance so they bridge
+  // the 8-min ADSBx poll gap.
+  const nowPrune = Date.now();
   for (const [hex, f] of FLIGHTS) {
-    if (f._ts < cutoff) FLIGHTS.delete(hex);
+    const staleMs = f.mil ? MIL_STALE_MS : STALE_MS;
+    if (f._ts < nowPrune - staleMs) FLIGHTS.delete(hex);
   }
 }
 
@@ -170,6 +228,13 @@ function startBackgroundJobs() {
       }
     }, SNAPSHOT_MS);
     snapshotTimer.unref?.();
+  }
+  // Only spin up the ADSBx mil poller if the API key is present, and only
+  // once per warm instance.
+  if (!adsbxMilTimer && process.env.ADSBX_RAPIDAPI_KEY) {
+    refreshAdsbxMil().catch(() => {});
+    adsbxMilTimer = setInterval(() => { refreshAdsbxMil().catch(() => {}); }, ADSBX_MIL_INTERVAL_MS);
+    adsbxMilTimer.unref?.();
   }
 }
 
