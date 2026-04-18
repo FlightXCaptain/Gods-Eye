@@ -280,12 +280,26 @@ function Globe({
   const lastFrameMsRef = useRef(null);
   const AUTO_ROTATE_IDLE_MS = 30 * 1000;
   const AUTO_ROTATE_DEG_PER_SEC = 4;
+  // Sorted flight list — memoised so the expensive O(n log n) altitude sort
+  // runs only when the flight dataset actually refreshes (every ~25s), not
+  // on every RAF frame.
+  const sortedFlightsRef = useRef([]);
+  // Base canvas redraw throttle. During idle auto-rotate we'd otherwise be
+  // reparsing country / state / river / lake features 60×/sec; cap to ~30fps.
+  const lastBaseRedrawMsRef = useRef(0);
   const countriesRef = useRef(null);        // internal country borders (mesh) — drawing only
   const countryFeaturesRef = useRef(null);  // NE admin_0 features — hit-test (has names)
   const statesRef = useRef(null);           // NE admin_1 state/province lines (zoom ≥ 2.5)
   const riversRef = useRef(null);           // Natural Earth rivers 50m
   const lakesRef = useRef(null);            // Natural Earth lakes 50m
   const citiesRef = useRef(null);           // Natural Earth populated places 50m
+
+  // Rebuild the altitude-sorted flight array only when data.flights changes.
+  useEffect(() => {
+    sortedFlightsRef.current = data.flights
+      ? data.flights.slice().sort((a, b) => (b.alt || 0) - (a.alt || 0))
+      : [];
+  }, [data.flights]);
 
   // Periodic prune of trail history — drop entries whose newest point is older
   // than TRAIL_STALE_MS. Without this, the flight/ship Maps grow unbounded as
@@ -702,14 +716,20 @@ function Globe({
       lastFrameMsRef.current = tickNow;
 
       // Auto-rotate when idle. Skips when focusTarget is locking the view to
-      // a point — otherwise we'd fight the fly-to animation.
+      // a point — otherwise we'd fight the fly-to animation. Base redraw is
+      // throttled to ~30fps while spinning so we're not reparsing all the
+      // Natural Earth features 60×/sec; overlay still redraws every frame
+      // so icons stay smooth.
       if (autoRotate && !focusTarget && frameDt > 0 && frameDt < 0.5
           && Date.now() - lastInteractionRef.current >= AUTO_ROTATE_IDLE_MS) {
         const r = rotRef.current;
         const nx = r[0] + AUTO_ROTATE_DEG_PER_SEC * frameDt;
         rotRef.current = [nx, r[1], 0];
         targetRotRef.current = [...rotRef.current];
-        dirtyBase.current = true;
+        if (tickNow - lastBaseRedrawMsRef.current > 33) {
+          dirtyBase.current = true;
+          lastBaseRedrawMsRef.current = tickNow;
+        }
       }
 
       // Smooth toward target (lerp)
@@ -780,12 +800,15 @@ function Globe({
           bctx.setLineDash([]);
         }
 
-        // State / province lines — fade in over zoom 2.5 → 4.
-        if (statesRef.current && zoomB >= 2.5) {
-          const sa = Math.min(0.4, (zoomB - 2.5) * 0.3 + 0.1);
+        // State / province lines — fade in from zoom 1.8, fully visible by 4.
+        // Dropped the threshold from 2.5 → 1.8 so sub-national borders appear
+        // at the same zoom cities do; no point showing Tokyo but hiding the
+        // Kanto boundary around it.
+        if (statesRef.current && zoomB >= 1.8) {
+          const sa = Math.min(0.5, (zoomB - 1.8) * 0.22 + 0.08);
           bctx.beginPath(); path(statesRef.current);
-          bctx.strokeStyle = isDark ? `rgba(148,163,184,${sa})` : `rgba(71,85,105,${sa})`;
-          bctx.lineWidth = 0.4;
+          bctx.strokeStyle = isDark ? `rgba(148,163,184,${sa})` : `rgba(71,85,105,${sa * 1.1})`;
+          bctx.lineWidth = zoomB >= 3 ? 0.5 : 0.4;
           bctx.setLineDash([1, 2]);
           bctx.stroke();
           bctx.setLineDash([]);
@@ -1047,8 +1070,9 @@ function Globe({
           zoom <= 2   ? 0.55 + (zoom - 1) * 0.2 :      // 0.55 → 0.75
           zoom <= 3   ? 0.75 + (zoom - 2) * 0.15 :     // 0.75 → 0.9
                          Math.min(1.0, 0.9 + (zoom - 3) * 0.05);
-        // Prefer higher-altitude aircraft per bin.
-        const sorted = data.flights.slice().sort((a, b) => (b.alt || 0) - (a.alt || 0));
+        // Prefer higher-altitude aircraft per bin. Sorted list is kept in a
+        // ref and refreshed only when data.flights changes (see useEffect).
+        const sorted = sortedFlightsRef.current.length ? sortedFlightsRef.current : data.flights;
         const seenFlight = new Set();
         const rendered = [];
         for (const f of sorted) {
