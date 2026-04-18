@@ -266,6 +266,7 @@ function Globe({
   const gridRef = useRef(null);
   const countriesRef = useRef(null);        // internal country borders (mesh) — drawing only
   const countryFeaturesRef = useRef(null);  // NE admin_0 features — hit-test (has names)
+  const statesRef = useRef(null);           // NE admin_1 state/province lines (zoom ≥ 2.5)
   const riversRef = useRef(null);           // Natural Earth rivers 50m
   const lakesRef = useRef(null);            // Natural Earth lakes 50m
   const citiesRef = useRef(null);           // Natural Earth populated places 50m
@@ -294,6 +295,14 @@ function Globe({
         const hc = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/110m/cultural/ne_110m_admin_0_countries_lakes.json');
         countryFeaturesRef.current = hc.features || [];
       } catch (e) { console.warn('country hit-data load fail', e); }
+
+      // State / province lines (admin_1). Lines-only file so there's no fill
+      // overhead. Drawn only at zoom ≥ 2.5 — at globe view they'd just be noise.
+      try {
+        const s = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/50m/cultural/ne_50m_admin_1_states_provinces_lines.json');
+        statesRef.current = s;
+        dirtyBase.current = true;
+      } catch (e) { console.warn('states load fail', e); }
 
       // Rivers, lakes, cities — Natural Earth via jsdelivr-hosted geojson.
       try {
@@ -714,6 +723,17 @@ function Globe({
           bctx.setLineDash([]);
         }
 
+        // State / province lines — fade in over zoom 2.5 → 4.
+        if (statesRef.current && zoomB >= 2.5) {
+          const sa = Math.min(0.4, (zoomB - 2.5) * 0.3 + 0.1);
+          bctx.beginPath(); path(statesRef.current);
+          bctx.strokeStyle = isDark ? `rgba(148,163,184,${sa})` : `rgba(71,85,105,${sa})`;
+          bctx.lineWidth = 0.4;
+          bctx.setLineDash([1, 2]);
+          bctx.stroke();
+          bctx.setLineDash([]);
+        }
+
         // Rivers — zoom ≥ 1.5. Thin cyan hairlines.
         if (riversRef.current && zoomB >= 1.5) {
           const ra = Math.min(0.65, 0.15 + (zoomB - 1.5) * 0.3);
@@ -761,8 +781,10 @@ function Globe({
                 lon, lat,
               },
             });
-            // Label only for top cities and only when zoomed enough to read.
-            if (zoomB >= 2.4 && sr <= rankCap - 2) {
+            // City LABELS only at deep zoom — dots keep showing at current
+            // thresholds but names hold back until the globe is zoomed in
+            // enough that a wall of text isn't fighting the map.
+            if (zoomB >= 3.5 && sr <= rankCap - 2) {
               const name = p.name || p.NAME || '';
               if (name) {
                 bctx.fillStyle = isDark ? 'rgba(255,255,255,0.85)' : 'rgba(15,23,42,0.9)';
@@ -879,121 +901,80 @@ function Globe({
         }
       }
 
-      // Flights — LOD with density heatmap for saturated regions.
-      //  1/cell           → full plane icon
-      //  2-8/cell         → small plane icons (cap drawn at ~3 to avoid blob)
-      //  >8/cell          → a single translucent density tile (no per-plane dots)
+      // Plane glyph — clean aviation-tracker silhouette, designed at 10px
+      // nose-to-tail. Shared between flight rendering below.
+      const planeFill   = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.88)';
+      const planeStroke = isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.7)';
+      const drawPlane = (cx, cy, hdg, scale) => {
+        octx.save();
+        octx.translate(cx, cy);
+        octx.rotate(((hdg||0)) * Math.PI/180);
+        octx.scale(scale, scale);
+        octx.beginPath();
+        octx.moveTo(0, -5);
+        octx.lineTo(0.6, -1.5);
+        octx.lineTo(5.5, 1.2);
+        octx.lineTo(5.5, 1.8);
+        octx.lineTo(0.6, 0.8);
+        octx.lineTo(0.6, 3.2);
+        octx.lineTo(2.2, 4.2);
+        octx.lineTo(2.2, 4.6);
+        octx.lineTo(0, 4.1);
+        octx.lineTo(-2.2, 4.6);
+        octx.lineTo(-2.2, 4.2);
+        octx.lineTo(-0.6, 3.2);
+        octx.lineTo(-0.6, 0.8);
+        octx.lineTo(-5.5, 1.8);
+        octx.lineTo(-5.5, 1.2);
+        octx.lineTo(-0.6, -1.5);
+        octx.closePath();
+        octx.fillStyle = planeFill;
+        octx.fill();
+        octx.strokeStyle = planeStroke;
+        octx.lineWidth = 0.5 / scale;
+        octx.stroke();
+        octx.restore();
+      };
+
+      // Flights — spatial decimation. One real plane per screen bin, skip the
+      // rest. Bin size scales with zoom; at low zoom we want *fewer, smaller*
+      // planes so European airspace doesn't turn into an opaque dogpile, and
+      // at high zoom we want many individual aircraft visible.
+      //
+      //   zoom  ≤ 1     → 26px bin, 0.55 scale   (world view: hints, not mass)
+      //   zoom  1 – 2   → ramp down to 14px, 0.75 scale
+      //   zoom  2 – 4   → 11-ish px, 0.9 scale
+      //   zoom  ≥ 4     → 9px, 1.0 scale         (approach view: real icons)
       if (layers.flights && data.flights) {
-        const fPts = [];
-        for (const f of data.flights) {
+        const flightCell =
+          zoom <= 1   ? 26 :
+          zoom <= 2   ? 26 - (zoom - 1) * 12 :         // 26 → 14
+          zoom <= 4   ? 14 - (zoom - 2) * 1.5 :        // 14 → 11
+                         Math.max(9, 14 / zoom);
+        const scale =
+          zoom <= 1   ? 0.55 :
+          zoom <= 2   ? 0.55 + (zoom - 1) * 0.2 :      // 0.55 → 0.75
+          zoom <= 3   ? 0.75 + (zoom - 2) * 0.15 :     // 0.75 → 0.9
+                         Math.min(1.0, 0.9 + (zoom - 3) * 0.05);
+        // Prefer higher-altitude aircraft per bin — cruising airliners read
+        // better than low-flying spotter planes, and a consistent altitude
+        // floor makes the visible fleet feel coherent.
+        const sorted = data.flights.slice().sort((a, b) => (b.alt || 0) - (a.alt || 0));
+        const seenFlight = new Set();
+        for (const f of sorted) {
           if (!visibleOn(projection, f.lon, f.lat)) continue;
           const pt = projection([f.lon, f.lat]); if (!pt) continue;
-          fPts.push({ px: pt[0], py: pt[1], f });
-        }
-        const cellPx = Math.max(22, 34/zoom);
-        // Bucket into cells
-        const cells = new Map();
-        for (const p of fPts) {
-          const kx = Math.floor(p.px/cellPx), ky = Math.floor(p.py/cellPx);
-          const key = kx+':'+ky;
-          let b = cells.get(key);
-          if (!b) { b = { kx, ky, items: [], sx:0, sy:0 }; cells.set(key, b); }
-          b.items.push(p);
-          b.sx += p.px; b.sy += p.py;
-        }
-        const planeFill   = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.88)';
-        const planeStroke = isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.7)';
-        // Clean aviation-tracker plane: long fuselage, swept wings, small tail.
-        // Designed at 10px nose-to-tail so "scale=1" means ~10px plane.
-        // Oriented nose-up (towards -y) so heading maps directly to rotation.
-        const drawPlane = (cx, cy, hdg, scale) => {
-          octx.save();
-          octx.translate(cx, cy);
-          octx.rotate(((hdg||0)) * Math.PI/180);
-          octx.scale(scale, scale);
-          octx.beginPath();
-          // Nose
-          octx.moveTo(0, -5);
-          // Upper right fuselage → right wing tip
-          octx.lineTo(0.6, -1.5);
-          octx.lineTo(5.5, 1.2);
-          octx.lineTo(5.5, 1.8);
-          octx.lineTo(0.6, 0.8);
-          // Fuselage down to right tail
-          octx.lineTo(0.6, 3.2);
-          octx.lineTo(2.2, 4.2);
-          octx.lineTo(2.2, 4.6);
-          octx.lineTo(0, 4.1);
-          // Mirror left side
-          octx.lineTo(-2.2, 4.6);
-          octx.lineTo(-2.2, 4.2);
-          octx.lineTo(-0.6, 3.2);
-          octx.lineTo(-0.6, 0.8);
-          octx.lineTo(-5.5, 1.8);
-          octx.lineTo(-5.5, 1.2);
-          octx.lineTo(-0.6, -1.5);
-          octx.closePath();
-          octx.fillStyle = planeFill;
-          octx.fill();
-          octx.strokeStyle = planeStroke;
-          octx.lineWidth = 0.5 / scale;
-          octx.stroke();
-          octx.restore();
-        };
-        for (const cell of cells.values()) {
-          const n = cell.items.length;
-          const cx = cell.sx / n, cy = cell.sy / n;
-          if (n === 1) {
-            const { px, py, f } = cell.items[0];
-            drawPlane(px, py, f.hdg, 1);
-            pushHit(px, py, 10, 'flight', f);
-          } else if (n <= 8) {
-            // Draw up to 3 small planes to hint there are multiple aircraft
-            const sample = cell.items.slice(0, 3);
-            for (const { px, py, f } of sample) {
-              drawPlane(px, py, f.hdg, 0.55);
-              pushHit(px, py, 6, 'flight', f);
-            }
-            // Remainder still hit-testable at cell center
-            if (cell.items.length > sample.length) {
-              pushHit(cx, cy, cellPx*0.5, 'cluster', {
-                kind:'cluster', layer:'flight',
-                items: cell.items.map(x=>x.f),
-                count: n, lon: cell.items[0].f.lon, lat: cell.items[0].f.lat,
-              });
-            }
-          } else {
-            // Density tile — translucent rounded square, opacity scales with density
-            const alpha = Math.min(0.38, 0.08 + Math.log10(n) * 0.12);
-            const size = cellPx * 0.85;
-            const r = 3;
-            const x = cx - size/2, y = cy - size/2;
-            octx.beginPath();
-            octx.moveTo(x+r, y);
-            octx.lineTo(x+size-r, y); octx.quadraticCurveTo(x+size, y, x+size, y+r);
-            octx.lineTo(x+size, y+size-r); octx.quadraticCurveTo(x+size, y+size, x+size-r, y+size);
-            octx.lineTo(x+r, y+size); octx.quadraticCurveTo(x, y+size, x, y+size-r);
-            octx.lineTo(x, y+r); octx.quadraticCurveTo(x, y, x+r, y);
-            octx.closePath();
-            octx.fillStyle = `rgba(125,211,252,${alpha})`;
-            octx.fill();
-            // Faint outline to ground it
-            octx.strokeStyle = `rgba(125,211,252,${Math.min(0.5, alpha + 0.15)})`;
-            octx.lineWidth = 0.6;
-            octx.stroke();
-            // One small plane silhouette in the center for type identification
-            const avgHdg = cell.items.reduce((s,p)=>s + (p.f.hdg||0), 0) / n;
-            drawPlane(cx, cy, avgHdg, 0.6);
-            pushHit(cx, cy, size/2, 'cluster', {
-              kind:'cluster', layer:'flight',
-              items: cell.items.map(x=>x.f),
-              count: n, lon: cell.items[0].f.lon, lat: cell.items[0].f.lat,
-            });
-          }
+          const [px, py] = pt;
+          const k = (Math.floor(px / flightCell) << 16) | (Math.floor(py / flightCell) & 0xffff);
+          if (seenFlight.has(k)) continue;
+          seenFlight.add(k);
+          drawPlane(px, py, f.hdg, scale);
+          pushHit(px, py, Math.max(7, flightCell * 0.45), 'flight', f);
         }
       }
 
-      // Ships — AIS feed. Category → color. Elongated hull icon points to heading.
+      // Ships — same spatial decimation as flights. One vessel per bin, no
+      // tiles, no count labels. Colour tells you the type at a glance.
       if (layers.ships && data.ships?.length) {
         const shipColor = {
           cargo:     '#22d3ee',
@@ -1006,52 +987,20 @@ function Globe({
           other:     isDark ? 'rgba(148,163,184,0.9)' : 'rgba(71,85,105,0.9)',
         };
         const shipStroke = isDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.8)';
-        // LOD: bin into ~14px cells, draw up to 2 icons per cell, density tile beyond
-        const cell = 14;
-        const bins = new Map();
+        const shipCell = Math.max(7, 11 / zoom);
+        const seenShip = new Set();
+        const shipScale = zoom >= 2 ? 1.0 : zoom >= 1.2 ? 0.85 : 0.7;
         for (const s of data.ships) {
           if (!visibleOn(projection, s.lon, s.lat)) continue;
           const pt = projection([s.lon, s.lat]); if (!pt) continue;
           const [px, py] = pt;
-          const k = (Math.round(px/cell)<<12) ^ Math.round(py/cell);
-          let b = bins.get(k);
-          if (!b) { b = { items: [], sx:0, sy:0 }; bins.set(k, b); }
-          b.items.push({ px, py, s });
-          b.sx += px; b.sy += py;
-        }
-        for (const b of bins.values()) {
-          const n = b.items.length;
-          if (n === 1) {
-            const { px, py, s } = b.items[0];
-            const col = shipColor[s.category] || shipColor.other;
-            const hdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0);
-            iconShip(octx, px, py, hdg, 1, col, shipStroke);
-            pushHit(px, py, 7, 'ship', s);
-          } else if (n <= 6) {
-            for (const { px, py, s } of b.items.slice(0, 3)) {
-              const col = shipColor[s.category] || shipColor.other;
-              const hdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0);
-              iconShip(octx, px, py, hdg, 0.7, col, shipStroke);
-              pushHit(px, py, 5, 'ship', s);
-            }
-          } else {
-            // Density tile for crowded shipping lanes
-            const cx = b.sx/n, cy = b.sy/n;
-            octx.fillStyle = isDark ? 'rgba(34,211,238,0.22)' : 'rgba(14,116,144,0.22)';
-            octx.fillRect(cx-cell/2, cy-cell/2, cell, cell);
-            octx.strokeStyle = isDark ? 'rgba(34,211,238,0.6)' : 'rgba(14,116,144,0.6)';
-            octx.lineWidth = 0.6;
-            octx.strokeRect(cx-cell/2+0.5, cy-cell/2+0.5, cell-1, cell-1);
-            // count label
-            octx.font = '600 9px Geist Mono, monospace';
-            octx.fillStyle = isDark ? 'rgba(255,255,255,0.85)' : 'rgba(20,20,30,0.85)';
-            octx.fillText(String(n), cx + cell/2 + 2, cy + 3);
-            pushHit(cx, cy, cell/2, 'cluster', {
-              kind:'cluster', layer:'ship',
-              items: b.items.map(x=>x.s),
-              count: n, lon: b.items[0].s.lon, lat: b.items[0].s.lat,
-            });
-          }
+          const k = (Math.floor(px / shipCell) << 16) | (Math.floor(py / shipCell) & 0xffff);
+          if (seenShip.has(k)) continue;
+          seenShip.add(k);
+          const col = shipColor[s.category] || shipColor.other;
+          const hdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0);
+          iconShip(octx, px, py, hdg, shipScale, col, shipStroke);
+          pushHit(px, py, Math.max(5, shipCell * 0.45), 'ship', s);
         }
       }
 
@@ -1163,19 +1112,6 @@ function Globe({
             octx.fillText('ISS', pt[0]+14, pt[1]+3);
             pushHit(pt[0], pt[1], 16, 'iss', data.iss);
           }
-        }
-      }
-
-      // Wiki flashes
-      if (layers.wiki && data.wikiFlashes) {
-        for (const w of data.wikiFlashes) {
-          const pt = projection([w.lon, w.lat]); if (!pt) continue;
-          if (!visibleOn(projection, w.lon, w.lat)) continue;
-          const age = Math.max(0, (now - w.t)/1400);
-          if (age > 1) continue;
-          octx.beginPath(); octx.arc(pt[0], pt[1], Math.max(0, 2 + age*14), 0, Math.PI*2);
-          octx.strokeStyle = `rgba(96,165,250,${0.7*(1-age)})`; octx.lineWidth = 1;
-          octx.stroke();
         }
       }
 
