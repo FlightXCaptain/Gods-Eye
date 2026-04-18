@@ -152,6 +152,31 @@ function iconEvent(ctx, cx, cy, size, color) {
   ctx.fill();
 }
 
+// Camera: compact body with lens bump — readable at size 9–12, recognisable
+// as a camcorder/webcam silhouette at a glance. Dark lens pupil provides
+// contrast against the coloured body so category colour (volcano = orange,
+// park = green, etc.) still reads without overwhelming the eye.
+function iconCamera(ctx, cx, cy, size, color) {
+  const s = size * 0.5;
+  ctx.fillStyle = color;
+  // body
+  ctx.fillRect(cx - s, cy - s*0.5, s*2, s*1.1);
+  // viewfinder bump on top
+  ctx.fillRect(cx - s*0.35, cy - s*0.85, s*0.7, s*0.35);
+  // lens — darker inner disc for contrast
+  ctx.beginPath();
+  ctx.arc(cx, cy + s*0.08, s*0.42, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
+  ctx.fill();
+  // glint
+  ctx.beginPath();
+  ctx.arc(cx, cy + s*0.08, s*0.18, 0, Math.PI*2);
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.9;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
 // Satellite: tiny horizontal body with two rectangular solar panel wings.
 // Reads as "sat with panels" at any size; distinct from ISS which is larger + labelled.
 function iconSat(ctx, cx, cy, size, color) {
@@ -326,6 +351,15 @@ function Globe({
   useEffect(() => {
     if (typeof window.subscribeWind !== 'function') return;
     return window.subscribeWind((g) => { windGridRef.current = g; });
+  }, []);
+
+  // Cameras — subscribe to the static camera list from /api/cameras (see
+  // src/cameras.jsx). Small array (~25–500 entries), replaced wholesale on
+  // each refresh; stored in a ref so updates don't trigger re-renders.
+  const camerasRef = useRef([]);
+  useEffect(() => {
+    if (typeof window.subscribeCameras !== 'function') return;
+    return window.subscribeCameras((list) => { camerasRef.current = list || []; });
   }, []);
 
   // Initialise / refresh the wind particle pool when size changes. Random
@@ -1198,6 +1232,29 @@ function Globe({
           else if (mode === 'compact') fn(octx, px, py, 7, c);
           else                         fn(octx, px, py, 4, c);
           pushHit(px, py, mode==='full'?9:6, 'event', e);
+        }
+      }
+
+      // Cameras — static point layer from /api/cameras. Far fewer entries
+      // than quakes/events so no LOD decimation; just colour by category.
+      if (layers.cameras && camerasRef.current && camerasRef.current.length) {
+        const camColor = (cat) => {
+          switch (cat) {
+            case 'volcano':  return '#f97316';   // orange, matches EONET volcano
+            case 'park':     return '#10b981';   // emerald
+            case 'wildlife': return '#14b8a6';   // teal
+            case 'city':     return isDark ? '#e5e7eb' : '#1f2937';
+            case 'airport':  return '#7dd3fc';   // sky, matches flights
+            default:         return '#f472b6';   // pink fallback
+          }
+        };
+        const camSize = zoom < 1.5 ? 8 : zoom < 3 ? 10 : 12;
+        for (const cam of camerasRef.current) {
+          if (typeof cam.lat !== 'number' || typeof cam.lon !== 'number') continue;
+          if (!visibleOn(projection, cam.lon, cam.lat)) continue;
+          const pt = projection([cam.lon, cam.lat]); if (!pt) continue;
+          iconCamera(octx, pt[0], pt[1], camSize, camColor(cam.category));
+          pushHit(pt[0], pt[1], camSize * 0.6, 'camera', cam);
         }
       }
 
