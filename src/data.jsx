@@ -123,11 +123,16 @@ async function fetchEONET() {
       const [sx,sy] = r.reduce((a,p)=>[a[0]+p[0],a[1]+p[1]],[0,0]);
       lon = sx/r.length; lat = sy/r.length;
     } else continue;
+    // Normalise EONET timestamps to epoch ms at ingestion so downstream
+    // filters can do cheap numeric comparisons instead of parsing ISO on
+    // every render.
+    const timeMs = last.date ? new Date(last.date).getTime() : NaN;
+    if (!isFinite(timeMs)) continue;
     out.push({
       id: e.id, lon, lat, title: e.title,
       category: e.categories?.[0]?.title || 'Event',
       categoryId: e.categories?.[0]?.id || 'other',
-      time: last.date, link: e.link, kind:'eonet',
+      time: timeMs, link: e.link, kind:'eonet',
     });
   }
   return out;
@@ -156,6 +161,9 @@ async function fetchTsunamis() {
   return j.items.slice(-50).filter(i => i.latitude && i.longitude).map(i => ({
     id: i.id, lat:i.latitude, lon:i.longitude, country:i.country,
     location:i.locationName, year:i.year, month:i.month, day:i.day,
+    // Compose a ms timestamp from year/month/day so dossier / filters / hover
+    // "X ago" labels all work the same as other sources.
+    time: Date.UTC(i.year || 1970, (i.month || 1) - 1, i.day || 1),
     mag: i.eqMagnitude, height: i.maxWaterHeight, kind:'tsunami',
   }));
 }

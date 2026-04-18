@@ -787,6 +787,24 @@ function App() {
   // Time cursor
   const [nowCursor, setNowCursor] = useState(Date.now());
   const [playing, setPlaying] = useState(false);
+  // Loading overlay — visible only during the very first seconds while the
+  // SSE streams connect and the initial fetches land. Self-hides on either
+  // condition (first data arrived, or 4 s hard timeout) to avoid overstaying.
+  const [booting, setBooting] = useState(true);
+  useEffect(() => {
+    if (!booting) return;
+    const id = setTimeout(() => setBooting(false), 4000);
+    return () => clearTimeout(id);
+  }, [booting]);
+  // Drop the overlay the moment any substantive dataset is available.
+  useEffect(() => {
+    if (!booting) return;
+    if ((data.flights?.length || 0) > 0
+     || (data.ships?.length || 0) > 0
+     || (data.quakes?.length || 0) > 0) {
+      setBooting(false);
+    }
+  }, [booting, data.flights, data.ships, data.quakes]);
   const [playSpeed, setPlaySpeed] = useState(14400); // multiplier — "4h/s"
   // When live, keep cursor at Date.now()
   useEffect(() => {
@@ -984,28 +1002,36 @@ function App() {
   }, []);
   const [tweaks, setTweaks] = useState(false);
 
-  // Filter data by time cursor (quakes, events). 30-day lookback now; show
-  // anything that occurred within the 24-hour window ending at the cursor —
-  // that's the "what was happening at this point in the last month" view
-  // rather than a running cumulative display.
+  // Point-event layers (seismic, natural events) render only items whose
+  // most-recent timestamp falls in the 24 h window ending at the cursor.
+  // Same rule at cursor=NOW (live) and cursor=anywhere-in-past (scrub), so
+  // "live" shows genuinely live stuff and scrubbing shows what was happening
+  // at that point a week ago. Previously the event filter used a 30-day
+  // window which meant the "live" view was polluted with weeks-old events.
   const filteredData = useMemo(() => {
     const cutoff = nowCursor;
     const start = cutoff - 24*3600*1000;
     return {
       ...data,
       quakes: (data.quakes||[]).filter(q => q.time <= cutoff && q.time >= start),
-      events: (data.events||[]).filter(e => {
-        const t = e.time ? new Date(e.time).getTime() : 0;
-        // Events are multi-day; show if their most recent observation is at
-        // or before the cursor AND within the 30-day window.
-        return t <= cutoff && t >= cutoff - 30*24*3600*1000;
-      }),
+      events: (data.events||[]).filter(e => e.time <= cutoff && e.time >= start),
     };
   }, [data, nowCursor]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden">
       <div className="mesh" />
+      {/* Boot overlay — visible only until data starts streaming in or the
+          4s safety timeout fires. Minimal chrome so the user isn't staring
+          at a blank globe while the SSE connections warm up. */}
+      {booting && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
+          <div className="glass-strong rounded-full px-4 py-2 flex items-center gap-2.5 font-mono text-[11px] uppercase tracking-[0.2em] opacity-80">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent-500 bpulse shrink-0"/>
+            <span>Establishing uplink</span>
+          </div>
+        </div>
+      )}
       <div className="absolute inset-0 flex items-center justify-center">
         <Globe
           width={w} height={h}
