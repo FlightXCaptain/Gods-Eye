@@ -29,6 +29,15 @@ const REQUEST_STAGGER_MS = 110;        // delay between per-hotspot fetches
 const TRACK_MAX = 10;
 const TRACK_MIN_DLL = 0.02;
 
+// Per-source stale tolerance. Public aggregators update every few seconds, so
+// a 5-min window is ample. ADSBx polls are spaced minutes apart, so records
+// need longer grace before we drop them — otherwise they flicker between polls.
+const STALE_BY_SOURCE = {
+  'public':      5 * 60 * 1000,
+  'adsbx-mil':   15 * 60 * 1000,
+  'adsbx-ocean': 50 * 60 * 1000,
+};
+
 // Covers every continent + polar + major oceanic corridors. Each anchor
 // pulls aircraft within 250 nm; 250 nm ≈ 463 km, so dense anchors with
 // overlap give effectively global coverage including mid-ocean routes.
@@ -86,6 +95,7 @@ const FLIGHT_HOSTS = [
 let refreshRunning = false;
 let snapshotTimer = null;
 let adsbxMilTimer = null;
+let adsbxOceanTimer = null;
 
 // ADSBx via RapidAPI — the user's plan allows 10 000 queries/month; we
 // target 8 000 with margin for per-instance duplication on Vercel Fluid
@@ -96,10 +106,23 @@ let adsbxMilTimer = null;
 //     ≈ 0.65 × 8 000 budget → room for 2 concurrent instances and the
 //     occasional on-demand hex lookup without tripping the quota.
 const ADSBX_MIL_INTERVAL_MS = 8 * 60 * 1000;
-// Mil records stay visible longer than civilian ones to bridge the 8-min
-// poll gap — otherwise they'd drop from the map every 5 min (civilian
-// STALE_MS) and flicker on each refresh.
-const MIL_STALE_MS = 15 * 60 * 1000;
+
+// ADSBx ocean augmentation. Public aggregators rely on crowd-sourced
+// receivers which cluster around population centres; huge tracts of ocean
+// (mid-Atlantic, mid-Pacific, Indian Ocean, Southern Ocean) have no
+// receivers and public feeds go dark there. ADSBx has satellite-ADS-B
+// coverage for those gaps. Polling 4 strategic ocean points every 45 min
+// fills the trans-ocean corridors without burning the RapidAPI quota.
+//
+//   4 × (30d × 24h × 60m/45m) = 3 840 queries/month
+//   Combined with mil (5 400/mo): 9 240/mo, under the 10 k cap
+const ADSBX_OCEAN_INTERVAL_MS = 45 * 60 * 1000;
+const ADSBX_OCEAN_POINTS = [
+  [40, -40],     // North Atlantic (NYC ↔ Europe corridor)
+  [35, -170],    // North Pacific (NA ↔ East Asia corridor)
+  [-10, 75],     // Indian Ocean (Europe ↔ Australia corridor)
+  [-20, -140],   // South Pacific (Australia ↔ South America)
+];
 
 async function safeFetch(url, opts = {}, timeoutMs = 8000) {
   try {
@@ -153,11 +176,62 @@ async function refreshAdsbxMil() {
       lon: a.lon, lat: a.lat,
       alt: typeof a.alt_baro === 'number' ? a.alt_baro : prev?.alt,
       vel: a.gs, hdg: a.track,
+      track,
       kind: 'flight',
       source: 'adsbx-mil',
       mil: true,
       _ts: now,
     });
+  }
+}
+
+// ADSBx ocean augmentation. Iterates a small set of mid-ocean anchor
+// points and pulls aircraft within 250 nm via RapidAPI. Merges into the
+// shared FLIGHTS map so they're indistinguishable from civilian aircraft
+// in the UI, just with `source: 'adsbx-ocean'` for the dossier and for
+// the prune to know how long to keep them around.
+async function refreshAdsbxOcean() {
+  const key = process.env.ADSBX_RAPIDAPI_KEY;
+  if (!key) return;
+  const headers = {
+    'x-rapidapi-host': 'adsbexchange-com1.p.rapidapi.com',
+    'x-rapidapi-key': key,
+  };
+  for (const [la, lo] of ADSBX_OCEAN_POINTS) {
+    const j = await safeFetch(
+      `https://adsbexchange-com1.p.rapidapi.com/v2/lat/${la}/lon/${lo}/dist/250/`,
+      { headers }
+    );
+    if (!j?.ac?.length) { await new Promise(r => setTimeout(r, 250)); continue; }
+    const now = Date.now();
+    for (const a of j.ac) {
+      if (a.lat == null || a.lon == null) continue;
+      const hex = a.hex;
+      if (!hex) continue;
+      const prev = FLIGHTS.get(hex);
+      const track = prev?.track ? prev.track.slice() : [];
+      const last = track[track.length - 1];
+      if (!last || Math.abs(last[0] - a.lon) > TRACK_MIN_DLL || Math.abs(last[1] - a.lat) > TRACK_MIN_DLL) {
+        track.push([a.lon, a.lat]);
+        while (track.length > TRACK_MAX) track.shift();
+      }
+      FLIGHTS.set(hex, {
+        id: hex,
+        callsign: (a.flight || '').trim() || a.r || hex,
+        reg: a.r, type: a.t, desc: a.desc,
+        lon: a.lon, lat: a.lat,
+        alt: typeof a.alt_baro === 'number' ? a.alt_baro : prev?.alt,
+        vel: a.gs, hdg: a.track,
+        track,
+        kind: 'flight',
+        // Preserve mil tag if we already have it via the mil poller.
+        source: prev?.mil ? 'adsbx-mil' : 'adsbx-ocean',
+        mil: prev?.mil || false,
+        _ts: now,
+      });
+    }
+    // Small stagger so we don't thrash the RapidAPI host.
+    await new Promise(r => setTimeout(r, 250));
   }
 }
 
@@ -190,16 +264,20 @@ async function refresh() {
         alt: a.alt_baro, vel: a.gs, hdg: a.track,
         track,
         kind: 'flight',
+        // Preserve mil tag if this aircraft was also seen via ADSBx mil —
+        // losing it on every public update would cause the MIL badge to
+        // flicker as civilian polls overwrite it.
+        source: prev?.mil ? 'adsbx-mil' : 'public',
+        mil: prev?.mil || false,
         _ts: now,
       });
     }
     await new Promise(r => setTimeout(r, REQUEST_STAGGER_MS));
   }
-  // Prune stale — mil records get the longer tolerance so they bridge
-  // the 8-min ADSBx poll gap.
+  // Prune stale — per-source TTL from STALE_BY_SOURCE (defined at top).
   const nowPrune = Date.now();
   for (const [hex, f] of FLIGHTS) {
-    const staleMs = f.mil ? MIL_STALE_MS : STALE_MS;
+    const staleMs = STALE_BY_SOURCE[f.source] || STALE_MS;
     if (f._ts < nowPrune - staleMs) FLIGHTS.delete(hex);
   }
 }
@@ -229,12 +307,20 @@ function startBackgroundJobs() {
     }, SNAPSHOT_MS);
     snapshotTimer.unref?.();
   }
-  // Only spin up the ADSBx mil poller if the API key is present, and only
-  // once per warm instance.
-  if (!adsbxMilTimer && process.env.ADSBX_RAPIDAPI_KEY) {
-    refreshAdsbxMil().catch(() => {});
-    adsbxMilTimer = setInterval(() => { refreshAdsbxMil().catch(() => {}); }, ADSBX_MIL_INTERVAL_MS);
-    adsbxMilTimer.unref?.();
+  // Only spin up the ADSBx pollers if the API key is present, and only
+  // once per warm instance. The two pollers share quota so both run as
+  // a pair — disabling one would be minimal saving.
+  if (process.env.ADSBX_RAPIDAPI_KEY) {
+    if (!adsbxMilTimer) {
+      refreshAdsbxMil().catch(() => {});
+      adsbxMilTimer = setInterval(() => { refreshAdsbxMil().catch(() => {}); }, ADSBX_MIL_INTERVAL_MS);
+      adsbxMilTimer.unref?.();
+    }
+    if (!adsbxOceanTimer) {
+      refreshAdsbxOcean().catch(() => {});
+      adsbxOceanTimer = setInterval(() => { refreshAdsbxOcean().catch(() => {}); }, ADSBX_OCEAN_INTERVAL_MS);
+      adsbxOceanTimer.unref?.();
+    }
   }
 }
 

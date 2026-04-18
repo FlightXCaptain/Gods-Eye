@@ -477,7 +477,11 @@ function Dossier({ item, onClose }) {
           <KV k="Altitude" v={typeof item.alt === 'number' ? `${item.alt.toLocaleString()} ft` : (item.alt || '—')}/>
           <KV k="Speed" v={item.vel ? `${Math.round(item.vel)} kt` : '—'}/>
           <KV k="Heading" v={item.hdg ? `${Math.round(item.hdg)}°` : '—'}/>
-          {item.source === 'adsbx-mil' && <div className="text-[10px] opacity-50 font-mono pt-1">Source · ADSBx</div>}
+          {item.source && item.source !== 'public' && (
+            <div className="text-[10px] opacity-50 font-mono pt-1">
+              Source · ADSBx {item.source === 'adsbx-ocean' ? '(ocean)' : ''}
+            </div>
+          )}
         </>}
         {layer === 'ship' && <>
           <div className="text-lg">{item.name || `MMSI ${item.mmsi}`}</div>
