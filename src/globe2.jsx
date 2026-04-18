@@ -879,121 +879,64 @@ function Globe({
         }
       }
 
-      // Flights — LOD with density heatmap for saturated regions.
-      //  1/cell           → full plane icon
-      //  2-8/cell         → small plane icons (cap drawn at ~3 to avoid blob)
-      //  >8/cell          → a single translucent density tile (no per-plane dots)
+      // Plane glyph — clean aviation-tracker silhouette, designed at 10px
+      // nose-to-tail. Shared between flight rendering below.
+      const planeFill   = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.88)';
+      const planeStroke = isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.7)';
+      const drawPlane = (cx, cy, hdg, scale) => {
+        octx.save();
+        octx.translate(cx, cy);
+        octx.rotate(((hdg||0)) * Math.PI/180);
+        octx.scale(scale, scale);
+        octx.beginPath();
+        octx.moveTo(0, -5);
+        octx.lineTo(0.6, -1.5);
+        octx.lineTo(5.5, 1.2);
+        octx.lineTo(5.5, 1.8);
+        octx.lineTo(0.6, 0.8);
+        octx.lineTo(0.6, 3.2);
+        octx.lineTo(2.2, 4.2);
+        octx.lineTo(2.2, 4.6);
+        octx.lineTo(0, 4.1);
+        octx.lineTo(-2.2, 4.6);
+        octx.lineTo(-2.2, 4.2);
+        octx.lineTo(-0.6, 3.2);
+        octx.lineTo(-0.6, 0.8);
+        octx.lineTo(-5.5, 1.8);
+        octx.lineTo(-5.5, 1.2);
+        octx.lineTo(-0.6, -1.5);
+        octx.closePath();
+        octx.fillStyle = planeFill;
+        octx.fill();
+        octx.strokeStyle = planeStroke;
+        octx.lineWidth = 0.5 / scale;
+        octx.stroke();
+        octx.restore();
+      };
+
+      // Flights — spatial decimation. Bin every flight by a ~zoom-scaled screen
+      // cell; draw ONE real plane per occupied bin and skip the rest. This
+      // replaces the old density-tile approach that painted ugly numbered
+      // rectangles across the map. Natural overdraw in dense regions reads as
+      // density without blocking the globe.
       if (layers.flights && data.flights) {
-        const fPts = [];
+        const flightCell = Math.max(10, 16 / zoom);
+        const seenFlight = new Set();
+        const scale = zoom >= 2 ? 0.95 : zoom >= 1.2 ? 0.85 : 0.75;
         for (const f of data.flights) {
           if (!visibleOn(projection, f.lon, f.lat)) continue;
           const pt = projection([f.lon, f.lat]); if (!pt) continue;
-          fPts.push({ px: pt[0], py: pt[1], f });
-        }
-        const cellPx = Math.max(22, 34/zoom);
-        // Bucket into cells
-        const cells = new Map();
-        for (const p of fPts) {
-          const kx = Math.floor(p.px/cellPx), ky = Math.floor(p.py/cellPx);
-          const key = kx+':'+ky;
-          let b = cells.get(key);
-          if (!b) { b = { kx, ky, items: [], sx:0, sy:0 }; cells.set(key, b); }
-          b.items.push(p);
-          b.sx += p.px; b.sy += p.py;
-        }
-        const planeFill   = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.88)';
-        const planeStroke = isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.7)';
-        // Clean aviation-tracker plane: long fuselage, swept wings, small tail.
-        // Designed at 10px nose-to-tail so "scale=1" means ~10px plane.
-        // Oriented nose-up (towards -y) so heading maps directly to rotation.
-        const drawPlane = (cx, cy, hdg, scale) => {
-          octx.save();
-          octx.translate(cx, cy);
-          octx.rotate(((hdg||0)) * Math.PI/180);
-          octx.scale(scale, scale);
-          octx.beginPath();
-          // Nose
-          octx.moveTo(0, -5);
-          // Upper right fuselage → right wing tip
-          octx.lineTo(0.6, -1.5);
-          octx.lineTo(5.5, 1.2);
-          octx.lineTo(5.5, 1.8);
-          octx.lineTo(0.6, 0.8);
-          // Fuselage down to right tail
-          octx.lineTo(0.6, 3.2);
-          octx.lineTo(2.2, 4.2);
-          octx.lineTo(2.2, 4.6);
-          octx.lineTo(0, 4.1);
-          // Mirror left side
-          octx.lineTo(-2.2, 4.6);
-          octx.lineTo(-2.2, 4.2);
-          octx.lineTo(-0.6, 3.2);
-          octx.lineTo(-0.6, 0.8);
-          octx.lineTo(-5.5, 1.8);
-          octx.lineTo(-5.5, 1.2);
-          octx.lineTo(-0.6, -1.5);
-          octx.closePath();
-          octx.fillStyle = planeFill;
-          octx.fill();
-          octx.strokeStyle = planeStroke;
-          octx.lineWidth = 0.5 / scale;
-          octx.stroke();
-          octx.restore();
-        };
-        for (const cell of cells.values()) {
-          const n = cell.items.length;
-          const cx = cell.sx / n, cy = cell.sy / n;
-          if (n === 1) {
-            const { px, py, f } = cell.items[0];
-            drawPlane(px, py, f.hdg, 1);
-            pushHit(px, py, 10, 'flight', f);
-          } else if (n <= 8) {
-            // Draw up to 3 small planes to hint there are multiple aircraft
-            const sample = cell.items.slice(0, 3);
-            for (const { px, py, f } of sample) {
-              drawPlane(px, py, f.hdg, 0.55);
-              pushHit(px, py, 6, 'flight', f);
-            }
-            // Remainder still hit-testable at cell center
-            if (cell.items.length > sample.length) {
-              pushHit(cx, cy, cellPx*0.5, 'cluster', {
-                kind:'cluster', layer:'flight',
-                items: cell.items.map(x=>x.f),
-                count: n, lon: cell.items[0].f.lon, lat: cell.items[0].f.lat,
-              });
-            }
-          } else {
-            // Density tile — translucent rounded square, opacity scales with density
-            const alpha = Math.min(0.38, 0.08 + Math.log10(n) * 0.12);
-            const size = cellPx * 0.85;
-            const r = 3;
-            const x = cx - size/2, y = cy - size/2;
-            octx.beginPath();
-            octx.moveTo(x+r, y);
-            octx.lineTo(x+size-r, y); octx.quadraticCurveTo(x+size, y, x+size, y+r);
-            octx.lineTo(x+size, y+size-r); octx.quadraticCurveTo(x+size, y+size, x+size-r, y+size);
-            octx.lineTo(x+r, y+size); octx.quadraticCurveTo(x, y+size, x, y+size-r);
-            octx.lineTo(x, y+r); octx.quadraticCurveTo(x, y, x+r, y);
-            octx.closePath();
-            octx.fillStyle = `rgba(125,211,252,${alpha})`;
-            octx.fill();
-            // Faint outline to ground it
-            octx.strokeStyle = `rgba(125,211,252,${Math.min(0.5, alpha + 0.15)})`;
-            octx.lineWidth = 0.6;
-            octx.stroke();
-            // One small plane silhouette in the center for type identification
-            const avgHdg = cell.items.reduce((s,p)=>s + (p.f.hdg||0), 0) / n;
-            drawPlane(cx, cy, avgHdg, 0.6);
-            pushHit(cx, cy, size/2, 'cluster', {
-              kind:'cluster', layer:'flight',
-              items: cell.items.map(x=>x.f),
-              count: n, lon: cell.items[0].f.lon, lat: cell.items[0].f.lat,
-            });
-          }
+          const [px, py] = pt;
+          const k = (Math.floor(px / flightCell) << 16) | (Math.floor(py / flightCell) & 0xffff);
+          if (seenFlight.has(k)) continue;
+          seenFlight.add(k);
+          drawPlane(px, py, f.hdg, scale);
+          pushHit(px, py, Math.max(7, flightCell * 0.5), 'flight', f);
         }
       }
 
-      // Ships — AIS feed. Category → color. Elongated hull icon points to heading.
+      // Ships — same spatial decimation as flights. One vessel per bin, no
+      // tiles, no count labels. Colour tells you the type at a glance.
       if (layers.ships && data.ships?.length) {
         const shipColor = {
           cargo:     '#22d3ee',
@@ -1006,52 +949,20 @@ function Globe({
           other:     isDark ? 'rgba(148,163,184,0.9)' : 'rgba(71,85,105,0.9)',
         };
         const shipStroke = isDark ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.8)';
-        // LOD: bin into ~14px cells, draw up to 2 icons per cell, density tile beyond
-        const cell = 14;
-        const bins = new Map();
+        const shipCell = Math.max(7, 11 / zoom);
+        const seenShip = new Set();
+        const shipScale = zoom >= 2 ? 1.0 : zoom >= 1.2 ? 0.85 : 0.7;
         for (const s of data.ships) {
           if (!visibleOn(projection, s.lon, s.lat)) continue;
           const pt = projection([s.lon, s.lat]); if (!pt) continue;
           const [px, py] = pt;
-          const k = (Math.round(px/cell)<<12) ^ Math.round(py/cell);
-          let b = bins.get(k);
-          if (!b) { b = { items: [], sx:0, sy:0 }; bins.set(k, b); }
-          b.items.push({ px, py, s });
-          b.sx += px; b.sy += py;
-        }
-        for (const b of bins.values()) {
-          const n = b.items.length;
-          if (n === 1) {
-            const { px, py, s } = b.items[0];
-            const col = shipColor[s.category] || shipColor.other;
-            const hdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0);
-            iconShip(octx, px, py, hdg, 1, col, shipStroke);
-            pushHit(px, py, 7, 'ship', s);
-          } else if (n <= 6) {
-            for (const { px, py, s } of b.items.slice(0, 3)) {
-              const col = shipColor[s.category] || shipColor.other;
-              const hdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0);
-              iconShip(octx, px, py, hdg, 0.7, col, shipStroke);
-              pushHit(px, py, 5, 'ship', s);
-            }
-          } else {
-            // Density tile for crowded shipping lanes
-            const cx = b.sx/n, cy = b.sy/n;
-            octx.fillStyle = isDark ? 'rgba(34,211,238,0.22)' : 'rgba(14,116,144,0.22)';
-            octx.fillRect(cx-cell/2, cy-cell/2, cell, cell);
-            octx.strokeStyle = isDark ? 'rgba(34,211,238,0.6)' : 'rgba(14,116,144,0.6)';
-            octx.lineWidth = 0.6;
-            octx.strokeRect(cx-cell/2+0.5, cy-cell/2+0.5, cell-1, cell-1);
-            // count label
-            octx.font = '600 9px Geist Mono, monospace';
-            octx.fillStyle = isDark ? 'rgba(255,255,255,0.85)' : 'rgba(20,20,30,0.85)';
-            octx.fillText(String(n), cx + cell/2 + 2, cy + 3);
-            pushHit(cx, cy, cell/2, 'cluster', {
-              kind:'cluster', layer:'ship',
-              items: b.items.map(x=>x.s),
-              count: n, lon: b.items[0].s.lon, lat: b.items[0].s.lat,
-            });
-          }
+          const k = (Math.floor(px / shipCell) << 16) | (Math.floor(py / shipCell) & 0xffff);
+          if (seenShip.has(k)) continue;
+          seenShip.add(k);
+          const col = shipColor[s.category] || shipColor.other;
+          const hdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0);
+          iconShip(octx, px, py, hdg, shipScale, col, shipStroke);
+          pushHit(px, py, Math.max(5, shipCell * 0.45), 'ship', s);
         }
       }
 
