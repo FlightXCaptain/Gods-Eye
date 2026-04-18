@@ -143,7 +143,13 @@ function SearchBar({ onLocate, targets, theme }) {
                 <button key={i} onClick={()=>{onLocate(m); setOpen(false); setQ('');}}
                         className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-black/5 dark:hover:bg-white/5 transition">
                   <div className="w-7 h-7 rounded-full flex items-center justify-center bg-accent-500/15 text-accent-500">
-                    <Icon name={m.type==='iss'?'zap':m.type==='flight'?'globe':'location'} className="w-3.5 h-3.5"/>
+                    <Icon name={
+                      m.type === 'iss' ? 'zap' :
+                      m.type === 'sat' ? 'zap' :
+                      m.type === 'flight' ? 'globe' :
+                      m.type === 'ship' ? 'globe' :
+                      'location'
+                    } className="w-3.5 h-3.5"/>
                   </div>
                   <div className="flex-1">
                     <div className="text-sm">{m.label}</div>
@@ -347,31 +353,26 @@ function StatBar({ data, kp }) {
   const quakeCount = data.quakes?.length || 0;
   const eventCount = data.events?.length || 0;
   const satCount = data.sats?.length || 0;
-  // `tier` controls mobile truncation:
-  //   0 = always visible (phones through desktop)
-  //   1 = shown at sm: breakpoint and up (≥640px)
-  //   2 = shown at md: breakpoint and up (≥768px)
+  // All six stats show on every breakpoint. The container is horizontally
+  // scrollable so overflow is a scroll gesture rather than hidden info.
+  // Mobile uses a 3-char abbreviation for the label so each pill stays narrow.
   const items = [
-    { label: 'Flights',      short: 'Flights', shortMobile: 'FLT', tier: 0, val: flightCount.toLocaleString(), glyph: 'flight', color: '#7dd3fc', title: 'Aircraft currently airborne (ADS-B via airplanes.live)' },
-    { label: 'Ships',        short: 'Ships',   shortMobile: 'SHP', tier: 0, val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
-    { label: 'Satellites',   short: 'Sats',    shortMobile: 'SAT', tier: 0, val: satCount.toLocaleString(),    glyph: 'sat',    color: '#d946ef', title: 'Orbital objects propagated from CelesTrak TLEs' },
-    { label: 'Earthquakes',  short: 'Quakes',  shortMobile: 'SEI', tier: 1, val: quakeCount,                   glyph: 'quake',  color: '#fb923c', title: 'Seismic events in the last 24h (USGS)' },
-    { label: 'Natural events', short: 'Nature',shortMobile: 'NAT', tier: 2, val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Active storms, wildfires, volcanoes, ice (NASA EONET)' },
-    { label: 'Geomagnetic',  short: 'Kp',      shortMobile: 'Kp',  tier: 1, val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
+    { label: 'Flights',      short: 'Flights', shortMobile: 'FLT', val: flightCount.toLocaleString(), glyph: 'flight', color: '#7dd3fc', title: 'Aircraft currently airborne (ADS-B via airplanes.live)' },
+    { label: 'Ships',        short: 'Ships',   shortMobile: 'SHP', val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
+    { label: 'Satellites',   short: 'Sats',    shortMobile: 'SAT', val: satCount.toLocaleString(),    glyph: 'sat',    color: '#d946ef', title: 'Orbital objects propagated from CelesTrak TLEs' },
+    { label: 'Earthquakes',  short: 'Quakes',  shortMobile: 'SEI', val: quakeCount,                   glyph: 'quake',  color: '#fb923c', title: 'Seismic events in the last 24h (USGS)' },
+    { label: 'Natural events', short: 'Nature',shortMobile: 'NAT', val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Active storms, wildfires, volcanoes, ice (NASA EONET)' },
+    { label: 'Geomagnetic',  short: 'Kp',      shortMobile: 'Kp',  val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
   ];
-  const visClass = t => t === 0 ? 'flex' : t === 1 ? 'hidden sm:flex' : 'hidden md:flex';
   return (
     <div className="glass rounded-full pl-2 pr-2.5 sm:pr-3 py-1.5 flex items-center gap-2 sm:gap-3 text-xs relative overflow-x-auto scrollbar-none max-w-full">
       {items.map((it, i) => (
         <React.Fragment key={it.label}>
-          {i > 0 && <div className={classNames('w-px h-3 bg-current opacity-10 shrink-0', visClass(it.tier))}/>}
-          <div title={it.title} className={classNames('items-center gap-1.5 cursor-help shrink-0', visClass(it.tier))}>
+          {i > 0 && <div className="w-px h-3 bg-current opacity-10 shrink-0"/>}
+          <div title={it.title} className="flex items-center gap-1.5 cursor-help shrink-0">
             <span className="inline-flex items-center justify-center" style={{ color: it.color }}>
               <GlyphSVG kind={it.glyph} color={it.color} size={12}/>
             </span>
-            {/* Short label always visible — mobile shows a 3-char abbreviation
-                so the number has a recognisable prefix; desktop gets the full
-                label back. */}
             <span className="text-[10px] uppercase font-mono opacity-60 tracking-wider hidden sm:inline">{it.short}</span>
             <span className="text-[10px] uppercase font-mono opacity-60 tracking-wider sm:hidden">{it.shortMobile}</span>
             <span className="font-mono tabular-nums">{it.val}</span>
@@ -694,6 +695,12 @@ function App() {
   }, [layers]);
 
   const [animIntensity, setAnimIntensity] = useState(TWEAK_DEFAULTS.animationIntensity);
+  // Auto-rotate the globe when idle. Persists across sessions.
+  const [autoRotate, setAutoRotate] = useState(() => {
+    try { const v = localStorage.getItem('ge-autorotate'); return v == null ? true : JSON.parse(v); }
+    catch { return true; }
+  });
+  useEffect(() => { localStorage.setItem('ge-autorotate', JSON.stringify(autoRotate)); }, [autoRotate]);
 
   // Data
   const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], iss:null, sats:[], satTLEs:[], ships:[] });
@@ -853,12 +860,26 @@ function App() {
     return unsub;
   }, []);
 
-  // Build locate targets
+  // Build locate targets — every live-tracked object the user might want to
+  // jump to. Lists are capped so the search fuzzy-filter stays snappy.
   const targets = useMemo(() => {
     const out = [];
     if (data.iss) out.push({ type:'iss', label:'ISS · ZARYA', coords:[data.iss.lon, data.iss.lat], sub: `${data.iss.alt?.toFixed(0)} km`, zoom: 1.8 });
     for (const f of (data.flights||[]).slice(0, 200)) {
       out.push({ type:'flight', label: f.callsign || f.reg, coords:[f.lon,f.lat], sub:`${f.desc||f.type||''}`, zoom: 2.2 });
+    }
+    // Satellites — CelesTrak propagated positions. Name is the discriminator
+    // (Starlink-1234, GPS BIIR-5, IRIDIUM 33 etc). Cap at 300 since there can
+    // be ~5000 in the dataset and the filter loop is O(n).
+    for (const s of (data.sats||[]).slice(0, 300)) {
+      if (!s.name) continue;
+      out.push({ type:'sat', label: s.name, coords:[s.lon, s.lat], sub: `${s.group || 'Satellite'} · ${Math.round(s.alt)} km`, zoom: 2.0 });
+    }
+    // Named ships from the AIS stream. MMSI-only vessels are skipped — they'd
+    // all search as "MMSI 123…" and swamp the list.
+    for (const v of (data.ships||[]).slice(0, 200)) {
+      if (!v.name) continue;
+      out.push({ type:'ship', label: v.name, coords:[v.lon, v.lat], sub: `${v.category || 'vessel'} · MMSI ${v.mmsi}`, zoom: 2.4 });
     }
     for (const q of (data.quakes||[]).slice(0, 40)) {
       out.push({ type:'quake', label:`M${q.mag?.toFixed(1)} · ${q.place}`, coords:[q.lon,q.lat], sub:fmtAgo(q.time)+' ago', zoom: 2.4 });
@@ -928,6 +949,7 @@ function App() {
           theme={theme}
           animationIntensity={animIntensity}
           layers={layers}
+          autoRotate={autoRotate}
         />
       </div>
 
@@ -992,6 +1014,21 @@ function App() {
                       playing={playing} setPlaying={setPlaying}
                       playSpeed={playSpeed} setPlaySpeed={setPlaySpeed}/>
         </div>
+      </div>
+
+      {/* Auto-rotate toggle — sits above the ticker/timeline stack. Icon flips
+          so the user can see at a glance whether the globe will resume spinning
+          when they stop interacting. */}
+      <div className="absolute bottom-24 right-3 sm:bottom-28 sm:right-4 z-10 pointer-events-auto">
+        <button
+          onClick={() => setAutoRotate(r => !r)}
+          title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
+          className={classNames(
+            'glass rounded-full p-2 transition hover:scale-105',
+            autoRotate && 'ring-2 ring-accent-500/50'
+          )}>
+          <Icon name={autoRotate ? 'reset' : 'pause'} className="w-4 h-4"/>
+        </button>
       </div>
 
       {/* Help hint — desktop only; gets in the way on tablets/phones */}
