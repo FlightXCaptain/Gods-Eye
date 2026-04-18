@@ -334,6 +334,30 @@ function LayersPopover({ layers, setLayers, theme }) {
                 </div>
               </div>
             )}
+
+            {/* Vessel category legend — explains the ship icon colours */}
+            {layers.ships && (
+              <div className="mt-2 pt-2 border-t border-black/5 dark:border-white/5 px-2">
+                <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider mb-1.5">Vessel types</div>
+                <div className="grid grid-cols-2 gap-y-1 gap-x-3 text-[11px]">
+                  {[
+                    ['Cargo',     '#22d3ee'],
+                    ['Tanker',    '#f59e0b'],
+                    ['Passenger', '#a78bfa'],
+                    ['Fishing',   '#34d399'],
+                    ['High-speed','#f472b6'],
+                    ['Service',   '#94a3b8'],
+                    ['Sail',      '#60a5fa'],
+                    ['Other',     '#94a3b8'],
+                  ].map(([l,c]) => (
+                    <div key={l} className="flex items-center gap-1.5 opacity-80">
+                      <GlyphSVG kind="ship" color={c} size={12}/>
+                      <span>{l}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -699,12 +723,21 @@ function App() {
   }, [layers]);
 
   const [animIntensity, setAnimIntensity] = useState(TWEAK_DEFAULTS.animationIntensity);
-  // Auto-rotate the globe when idle. Persists across sessions.
-  const [autoRotate, setAutoRotate] = useState(() => {
-    try { const v = localStorage.getItem('ge-autorotate'); return v == null ? true : JSON.parse(v); }
-    catch { return true; }
-  });
-  useEffect(() => { localStorage.setItem('ge-autorotate', JSON.stringify(autoRotate)); }, [autoRotate]);
+  // Auto-rotate. Starts on every load, any interaction flips it off, only
+  // the toolbar rotate button turns it back on. Re-enabling zooms the globe
+  // back out to its default scale so the resumed spin shows the whole world
+  // again rather than grinding through a zoomed-in corner.
+  const [autoRotate, setAutoRotate] = useState(true);
+  const [zoomOutSignal, setZoomOutSignal] = useState(0);
+  const stopAutoRotate = useCallback(() => {
+    setAutoRotate(prev => prev ? false : prev);
+  }, []);
+  const toggleAutoRotate = useCallback(() => {
+    setAutoRotate(prev => {
+      if (!prev) setZoomOutSignal(s => s + 1);
+      return !prev;
+    });
+  }, []);
 
   // Data
   const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], iss:null, sats:[], satTLEs:[], ships:[] });
@@ -785,26 +818,30 @@ function App() {
     return () => { alive = false; clearInterval(id); };
   }, []);
 
-  // Flights (airplanes.live)
+  // Flights — subscribe to /api/flights-stream (SSE). The server maintains
+  // persistent state so flights don't pop in/out between snapshots.
   useEffect(() => {
-    let alive = true;
-    const pull = async () => {
-      const f = await fetchFlights();
-      if (!alive) return;
-      setData(d => ({...d, flights: f}));
-      // Sample a few notable flights into feed (once each)
-      pushFeed((f||[]).filter(fl => fl.alt > 35000).slice(0,3).map(fl => ({
-        key: 'f:'+fl.id+':'+Math.floor(Date.now()/600000),
-        layer:'flight', time: Date.now(),
-        title: `${fl.callsign||fl.reg} · FL${Math.round((fl.alt||0)/100)}`,
-        sub: fl.desc || fl.type || `${Math.round(fl.vel||0)} kt`,
-        _item: { ...fl, _layer:'flight' },
-        coords: [fl.lon, fl.lat],
-      })));
-    };
-    pull();
-    const id = setInterval(pull, 25000);
-    return () => { alive = false; clearInterval(id); };
+    if (!window.subscribeFlights) return;
+    let lastFeedSample = 0;
+    const unsub = window.subscribeFlights(list => {
+      setData(d => ({ ...d, flights: list }));
+      // Sample the cruising traffic into the live feed at most once a minute
+      // so it shows a steady heartbeat of movement without spamming.
+      const now = Date.now();
+      if (now - lastFeedSample > 60_000 && list.length) {
+        lastFeedSample = now;
+        const sample = list.filter(fl => fl.alt > 35000).slice(0, 3);
+        pushFeed(sample.map(fl => ({
+          key: 'f:' + fl.id + ':' + Math.floor(now / 600000),
+          layer: 'flight', time: now,
+          title: `${fl.callsign || fl.reg} · FL${Math.round((fl.alt || 0) / 100)}`,
+          sub: fl.desc || fl.type || `${Math.round(fl.vel || 0)} kt`,
+          _item: { ...fl, _layer: 'flight' },
+          coords: [fl.lon, fl.lat],
+        })));
+      }
+    });
+    return unsub;
   }, []);
 
   // ISS
@@ -954,6 +991,8 @@ function App() {
           animationIntensity={animIntensity}
           layers={layers}
           autoRotate={autoRotate}
+          onInteract={stopAutoRotate}
+          zoomOutSignal={zoomOutSignal}
         />
       </div>
 
@@ -973,7 +1012,7 @@ function App() {
             <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
             <LayersPopover layers={layers} setLayers={setLayers} theme={theme}/>
             <button
-              onClick={() => setAutoRotate(r => !r)}
+              onClick={() => toggleAutoRotate()}
               title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
               className={classNames(
                 'glass rounded-full p-2 transition hover:scale-105',
@@ -996,7 +1035,7 @@ function App() {
           <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
           <LayersPopover layers={layers} setLayers={setLayers} theme={theme}/>
           <button
-            onClick={() => setAutoRotate(r => !r)}
+            onClick={() => toggleAutoRotate()}
             title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
             className={classNames(
               'glass rounded-full p-2 transition hover:scale-105',

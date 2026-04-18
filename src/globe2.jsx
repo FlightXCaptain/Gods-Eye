@@ -251,6 +251,7 @@ function classifyLOD(points, cellPx = 36) {
 function Globe({
   width, height, data, nowCursor, onPickMarker, focusTarget,
   theme, animationIntensity = 0.7, layers, autoRotate = true,
+  onInteract, zoomOutSignal = 0,
 }) {
   const wrapRef = useRef(null);
   const baseRef = useRef(null);   // land (cached, redraws on rotation)
@@ -274,11 +275,10 @@ function Globe({
   const shipHistRef   = useRef(new Map());
   const satHistRef    = useRef(new Map());
   const issHistRef    = useRef([]);
-  // Auto-rotate: resumes after 30s of no user interaction. Starts active on
-  // load (lastInteraction = 0, so the idle delta is trivially large).
-  const lastInteractionRef = useRef(0);
+  // Auto-rotate runs whenever the `autoRotate` prop is true. On any user
+  // interaction we fire `onInteract` so the parent can flip it off; to resume
+  // the user clicks the toolbar rotate button (also triggers zoomOutSignal).
   const lastFrameMsRef = useRef(null);
-  const AUTO_ROTATE_IDLE_MS = 30 * 1000;
   const AUTO_ROTATE_DEG_PER_SEC = 4;
   // Sorted flight list — memoised so the expensive O(n log n) altitude sort
   // runs only when the flight dataset actually refreshes (every ~25s), not
@@ -293,6 +293,15 @@ function Globe({
   const riversRef = useRef(null);           // Natural Earth rivers 50m
   const lakesRef = useRef(null);            // Natural Earth lakes 50m
   const citiesRef = useRef(null);           // Natural Earth populated places 50m
+
+  // Zoom-out signal — parent increments zoomOutSignal when auto-rotate is
+  // re-enabled via the toolbar button; we animate back to the default scale
+  // so the view restores to "global" before the spin picks up again.
+  useEffect(() => {
+    if (zoomOutSignal > 0) {
+      targetScaleRef.current = Math.min(width, height) / 2.1;
+    }
+  }, [zoomOutSignal, width, height]);
 
   // Rebuild the altitude-sorted flight array only when data.flights changes.
   useEffect(() => {
@@ -398,8 +407,10 @@ function Globe({
   useEffect(() => {
     const el = wrapRef.current; if (!el) return;
     const sel = d3.select(el);
-    // Any input from the user bumps lastInteraction so auto-rotate pauses.
-    const markInteraction = () => { lastInteractionRef.current = Date.now(); };
+    // Any input disables auto-rotate. Parent owns the on/off state, so we
+    // bubble up via onInteract rather than mutating a local ref — the user
+    // only re-enables rotation by clicking the toolbar button.
+    const markInteraction = () => { onInteract?.(); };
     // Velocity tracking for inertia
     let vx = 0, vy = 0, lastMove = 0, lastMx = 0, lastMy = 0;
     let dragging = false;
@@ -450,7 +461,7 @@ function Globe({
     // to sub-pixel on orthographic (inverting is nonlinear so one-shot can drift).
     const zoomToward = (mx, my, factor) => {
       const min = Math.min(width, height) / 3.5;
-      const max = Math.min(width, height) * 12;
+      const max = Math.min(width, height) * 50;
       const newScale = Math.max(min, Math.min(max, scaleRef.current * factor));
       projection.rotate(rotRef.current).scale(scaleRef.current);
       const anchor = projection.invert([mx, my]);
@@ -495,7 +506,7 @@ function Globe({
       const inv = projection.invert([mx, my]);
       if (!inv) return;
       targetRotRef.current = [-inv[0], -inv[1], 0];
-      targetScaleRef.current = Math.min(scaleRef.current * 2.5, Math.min(width, height) * 12);
+      targetScaleRef.current = Math.min(scaleRef.current * 2.5, Math.min(width, height) * 50);
     };
     el.addEventListener('dblclick', onDbl);
 
@@ -511,7 +522,7 @@ function Globe({
       if (!pick) return;
       if (pick._layer === 'cluster') {
         targetRotRef.current = [-pick.lon, -pick.lat, 0];
-        targetScaleRef.current = Math.min(scaleRef.current * 2.2, Math.min(width, height) * 12);
+        targetScaleRef.current = Math.min(scaleRef.current * 2.2, Math.min(width, height) * 50);
         return;
       }
       onPickMarker?.(pick);
@@ -715,13 +726,10 @@ function Globe({
       const frameDt = lastFrameMsRef.current ? (tickNow - lastFrameMsRef.current) / 1000 : 0;
       lastFrameMsRef.current = tickNow;
 
-      // Auto-rotate when idle. Skips when focusTarget is locking the view to
-      // a point — otherwise we'd fight the fly-to animation. Base redraw is
-      // throttled to ~30fps while spinning so we're not reparsing all the
-      // Natural Earth features 60×/sec; overlay still redraws every frame
-      // so icons stay smooth.
-      if (autoRotate && !focusTarget && frameDt > 0 && frameDt < 0.5
-          && Date.now() - lastInteractionRef.current >= AUTO_ROTATE_IDLE_MS) {
+      // Auto-rotate runs whenever the prop is true. Interactions flip it
+      // off via onInteract (parent owns the flag). Base redraw is throttled
+      // to ~30fps so we don't reparse every Natural Earth feature at 60 Hz.
+      if (autoRotate && !focusTarget && frameDt > 0 && frameDt < 0.5) {
         const r = rotRef.current;
         const nx = r[0] + AUTO_ROTATE_DEG_PER_SEC * frameDt;
         rotRef.current = [nx, r[1], 0];
