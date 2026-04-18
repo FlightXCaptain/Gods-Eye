@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vercel-dev",
+      "runtimeExecutable": "vercel",
+      "runtimeArgs": ["dev", "--listen", "3456", "--yes"],
+      "port": 3456
+    }
+  ]
+}

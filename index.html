@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>God's Eye</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['Geist', 'ui-sans-serif', 'system-ui'],
+        mono: ['Geist Mono', 'ui-monospace'],
+      },
+      colors: {
+        accent: { 50:'#fff1f2', 400:'#fb7185', 500:'#f43f5e', 600:'#e11d48' },
+      },
+    },
+  },
+}
+</script>
+<style>
+  html, body, #root { height: 100%; margin: 0; }
+  body { font-family: 'Geist', system-ui, sans-serif; font-feature-settings: "ss01","cv11"; overflow: hidden; }
+  .font-mono { font-family: 'Geist Mono', ui-monospace; }
+  /* Glass — medium */
+  .glass {
+    background: rgba(255,255,255,0.55);
+    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    border: 1px solid rgba(255,255,255,0.7);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.6) inset, 0 12px 40px -12px rgba(0,0,0,0.12);
+  }
+  .dark .glass {
+    background: rgba(17,17,22,0.5);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.04) inset, 0 12px 40px -12px rgba(0,0,0,0.5);
+  }
+  .glass-strong {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.8);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.7) inset, 0 20px 60px -15px rgba(0,0,0,0.18);
+  }
+  .dark .glass-strong {
+    background: rgba(12,12,16,0.75);
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 1px 0 0 rgba(255,255,255,0.06) inset, 0 20px 60px -15px rgba(0,0,0,0.7);
+  }
+  /* Ambient mesh */
+  .mesh {
+    position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .mesh::before, .mesh::after {
+    content: ""; position: absolute; border-radius: 50%; filter: blur(100px); opacity: 0.5;
+  }
+  .mesh::before {
+    width: 50vw; height: 50vw; top: -15vw; left: -10vw;
+    background: radial-gradient(circle, #f43f5e, transparent 60%);
+  }
+  .mesh::after {
+    width: 55vw; height: 55vw; bottom: -20vw; right: -15vw;
+    background: radial-gradient(circle, #8b5cf6, transparent 60%);
+    opacity: 0.35;
+  }
+  .dark .mesh::before { opacity: 0.25; }
+  .dark .mesh::after { opacity: 0.25; }
+  body { background: #fafafa; color: #0a0a0a; }
+  .dark body, body.dark { background: #0a0a0f; color: #fafafa; }
+  /* slider */
+  input[type=range].ak {
+    -webkit-appearance: none; appearance: none; height: 3px; background: rgba(127,127,127,0.25); border-radius: 2px;
+  }
+  input[type=range].ak::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #f43f5e; cursor: pointer; box-shadow: 0 0 0 4px rgba(244,63,94,0.15);
+  }
+  /* Hide scrollbar niceties */
+  .scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+  .scroll::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.25); border-radius: 999px; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+  .scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
+  /* Ticker scroll */
+  @keyframes tk { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  .tk-row { animation: tk 90s linear infinite; }
+  /* Fade edges for ticker */
+  .tk-mask { mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); }
+  /* Pulse */
+  @keyframes bpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .bpulse { animation: bpulse 1.6s ease-in-out infinite; }
+  /* Locate radial */
+  @keyframes radar { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .radar { animation: radar 2.4s linear infinite; }
+  /* Grab cursor */
+  .grabbable { cursor: grab; }
+  .grabbable:active { cursor: grabbing; }
+  /* Live feed entry */
+  @keyframes feedSlide { from { opacity: 0; transform: translateX(-12px); background: rgba(244,63,94,0.12); } to { opacity: 1; transform: translateX(0); background: transparent; } }
+  .feed-new { animation: feedSlide 0.6s ease-out; }
+</style>
+</head>
+<body class="dark">
+<div id="root"></div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/topojson-client@3/dist/topojson-client.min.js"></script>
+<script src="https://unpkg.com/satellite.js@5.0.0/dist/satellite.min.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="src/data.jsx"></script>
+<script src="src/keys.js"></script>
+<script type="text/babel" src="src/ships.jsx"></script>
+<script type="text/babel" src="src/globe2.jsx"></script>
+<script type="text/babel" src="src/app2.jsx"></script>
+
+</body>
+</html>
