@@ -781,8 +781,10 @@ function Globe({
                 lon, lat,
               },
             });
-            // Label only for top cities and only when zoomed enough to read.
-            if (zoomB >= 2.4 && sr <= rankCap - 2) {
+            // City LABELS only at deep zoom — dots keep showing at current
+            // thresholds but names hold back until the globe is zoomed in
+            // enough that a wall of text isn't fighting the map.
+            if (zoomB >= 3.5 && sr <= rankCap - 2) {
               const name = p.name || p.NAME || '';
               if (name) {
                 bctx.fillStyle = isDark ? 'rgba(255,255,255,0.85)' : 'rgba(15,23,42,0.9)';
