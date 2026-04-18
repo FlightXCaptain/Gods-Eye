@@ -437,8 +437,9 @@ function Dossier({ item, onClose }) {
   const diveInMeta = (() => {
     switch (layer) {
       case 'iss':
-      case 'sat':
         return { label: item.name || 'ISS · ZARYA', altMeters: 8000 };
+      case 'sat':
+        return { label: item.name || 'Satellite', altMeters: 8000 };
       case 'flight':
         return { label: item.callsign || item.reg || 'Aircraft', altMeters: 3000 };
       case 'ship':
