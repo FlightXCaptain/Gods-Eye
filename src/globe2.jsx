@@ -964,17 +964,17 @@ function Globe({
           return [uu, vv];
         };
 
-        // Always fade-clear — hard clearing every frame was flickering the
-        // layer during auto-rotate. When the globe's rotation or zoom has
-        // changed enough that old particle screen positions are stale, just
-        // drop the prev-coords so new segments start fresh; the fade does
-        // the visual cleanup within ~20 frames.
+        // Only hard-reset particle prev-coords on *big* user pans (>0.5°
+        // lat/lon or noticeable scale change). Auto-rotate advances about
+        // 0.07°/frame — far below this — so we don't fight the animation
+        // there. Individual frame drift of ~1-2px under auto-rotate is
+        // imperceptible and the fade-clear cleans up any staleness.
         const view = windViewRef.current;
         const rNow = rotRef.current, sNow = scaleRef.current;
         const moved = !view
-          || Math.abs(view[0] - rNow[0]) > 0.05
-          || Math.abs(view[1] - rNow[1]) > 0.05
-          || Math.abs(view[2] - sNow) > 0.5;
+          || Math.abs(view[0] - rNow[0]) > 0.6
+          || Math.abs(view[1] - rNow[1]) > 0.6
+          || Math.abs(view[2] - sNow) > 2.0;
         if (moved) {
           const particles = windParticlesRef.current;
           for (let i = 0; i < particles.length; i++) {
