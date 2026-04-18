@@ -444,15 +444,17 @@ function Dossier({ item, onClose }) {
       case 'ship':
         return { label: item.name || `MMSI ${item.mmsi}`, altMeters: 1500 };
       case 'city':
-        return { label: item.name, altMeters: 2500 };
+        return { label: item.name || 'City', altMeters: 2500 };
       case 'country':
-        return { label: item.name, altMeters: 50000 };
+        return { label: item.name || 'Country', altMeters: 50000 };
       case 'lake':
         return { label: item.name || 'Lake', altMeters: 8000 };
-      case 'quake':
-        return { label: `M${item.mag?.toFixed(1)} · ${item.place}`, altMeters: 4000 };
+      case 'quake': {
+        const mag = typeof item.mag === 'number' ? item.mag.toFixed(1) : '?';
+        return { label: `M${mag} · ${item.place || 'Earthquake'}`, altMeters: 4000 };
+      }
       case 'event':
-        return { label: item.title, altMeters: 5000 };
+        return { label: item.title || 'Event', altMeters: 5000 };
       default:
         return null;
     }
@@ -577,6 +579,7 @@ function Dossier({ item, onClose }) {
         {hasCoords && diveInMeta && (
           <div className="pt-1">
             <button
+              type="button"
               onClick={handleDiveIn}
               title="Open photoreal view"
               className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition"
