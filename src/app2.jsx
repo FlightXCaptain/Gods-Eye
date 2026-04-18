@@ -433,6 +433,45 @@ function StatBar({ data, kp }) {
 function Dossier({ item, onClose }) {
   if (!item) return null;
   const layer = item._layer || item.kind;
+  const hasCoords = typeof item.lon === 'number' && typeof item.lat === 'number';
+  const diveInMeta = (() => {
+    switch (layer) {
+      case 'iss':
+        return { label: item.name || 'ISS · ZARYA', altMeters: 8000 };
+      case 'sat':
+        return { label: item.name || 'Satellite', altMeters: 8000 };
+      case 'flight':
+        return { label: item.callsign || item.reg || 'Aircraft', altMeters: 3000 };
+      case 'ship':
+        return { label: item.name || `MMSI ${item.mmsi}`, altMeters: 1500 };
+      case 'city':
+        return { label: item.name || 'City', altMeters: 2500 };
+      case 'country':
+        return { label: item.name || 'Country', altMeters: 50000 };
+      case 'lake':
+        return { label: item.name || 'Lake', altMeters: 8000 };
+      case 'quake': {
+        const mag = typeof item.mag === 'number' ? item.mag.toFixed(1) : '?';
+        return { label: `M${mag} · ${item.place || 'Earthquake'}`, altMeters: 4000 };
+      }
+      case 'event':
+        return { label: item.title || 'Event', altMeters: 5000 };
+      default:
+        return null;
+    }
+  })();
+  const handleDiveIn = () => {
+    if (typeof window.openCesiumDiveIn !== 'function') {
+      console.warn('cesium viewer not ready');
+      return;
+    }
+    window.openCesiumDiveIn({
+      lon: item.lon,
+      lat: item.lat,
+      label: diveInMeta?.label,
+      altMeters: diveInMeta?.altMeters,
+    });
+  };
   return (
     <div className="glass-strong rounded-2xl w-[min(320px,calc(100vw-24px))] max-h-[calc(100vh-8rem)] overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-black/5 dark:border-white/5">
@@ -538,6 +577,18 @@ function Dossier({ item, onClose }) {
             <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
           )}
         </>}
+        {hasCoords && diveInMeta && (
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={handleDiveIn}
+              title="Open photoreal view"
+              className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition"
+            >
+              Dive in →
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
