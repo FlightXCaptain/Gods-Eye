@@ -156,9 +156,13 @@
 
   // --- Viewer construction ----------------------------------------------
   function mountViewer(modal, Cesium, { lon, lat, altMeters }) {
+    // In Cesium 1.100+ the Viewer auto-creates a default base layer pointing
+    // at Cesium Ion's Bing imagery — which requires a token we don't have.
+    // Without `baseLayer: false` it silently fails, leaving the scene blue
+    // (just the globe's default ocean colour with no imagery painted). Pass
+    // `false` to suppress the default, then add OSM ourselves.
     const viewer = new Cesium.Viewer(modal.cesiumContainer, {
-      // Default EllipsoidTerrainProvider is fine — we don't need heightmaps
-      // for a photoreal-style dive-in at this altitude.
+      baseLayer: false,
       baseLayerPicker: false,
       homeButton: false,
       sceneModePicker: false,
@@ -173,18 +177,17 @@
       selectionIndicator: false,
     });
 
-    // OSM needs no API key and gives perfectly usable global imagery. We add
-    // it post-construction via the layer collection — the `imageryProvider`
-    // constructor option and `OpenStreetMapImageryProvider` factory were
-    // deprecated in Cesium 1.104+, so we use UrlTemplateImageryProvider
-    // directly for the stable path in modern Cesium.
-    viewer.imageryLayers.removeAll();
-    viewer.imageryLayers.addImageryProvider(
-      new Cesium.UrlTemplateImageryProvider({
-        url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        credit: '© OpenStreetMap contributors',
-        maximumLevel: 19,
-      })
+    // OSM needs no API key and gives perfectly usable global imagery.
+    // UrlTemplateImageryProvider is the stable path in modern Cesium; the
+    // old `OpenStreetMapImageryProvider` factory was deprecated in 1.104+.
+    viewer.imageryLayers.add(
+      new Cesium.ImageryLayer(
+        new Cesium.UrlTemplateImageryProvider({
+          url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          credit: '© OpenStreetMap contributors',
+          maximumLevel: 19,
+        })
+      )
     );
 
     // Hide the loading shim once Cesium has taken over.
