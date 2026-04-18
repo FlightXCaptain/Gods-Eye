@@ -925,14 +925,30 @@ function Globe({
         arr.push({ lon, lat, t: nowMs });
         if (arr.length > TRAIL_MAX) arr.shift();
       };
+      // Normalises either form — records may pass:
+      //   a) [{lon, lat, t}, ...]      (client-side pushTrail history)
+      //   b) [[lon, lat], ...]         (server-seeded track from SSE record)
+      // so callers don't have to adapt.
+      const toLL = (p) => Array.isArray(p) ? { lon: p[0], lat: p[1] } : p;
+      // Max great-circle delta between consecutive points that we're willing
+      // to draw a segment for. Satellite TLE refreshes occasionally jump the
+      // predicted position; and anything wrapping the 180° meridian produces
+      // an antipodal pair after projection. Clip those artefacts.
+      const TRAIL_MAX_DEG_PER_SEG = 25;
       const drawTrail = (hist, color, altKm) => {
         if (!hist || hist.length < 2) return;
         const project = altKm ? ((lon, lat) => projectAtAltitude(projection, lon, lat, altKm)) : ((lon, lat) => projection([lon, lat]));
         for (let i = 0; i < hist.length - 1; i++) {
-          const p1 = project(hist[i].lon, hist[i].lat);
-          const p2 = project(hist[i+1].lon, hist[i+1].lat);
+          const a1 = toLL(hist[i]);
+          const a2 = toLL(hist[i+1]);
+          // Quick skip on degenerate or absurd segments.
+          let dLon = Math.abs(a1.lon - a2.lon);
+          if (dLon > 180) dLon = 360 - dLon;
+          const dLat = Math.abs(a1.lat - a2.lat);
+          if (dLon > TRAIL_MAX_DEG_PER_SEG || dLat > TRAIL_MAX_DEG_PER_SEG) continue;
+          const p1 = project(a1.lon, a1.lat);
+          const p2 = project(a2.lon, a2.lat);
           if (!p1 || !p2) continue;
-          // Alpha ramps from oldest (0.08) to newest (0.35) — natural tail.
           const a = 0.08 + (i / Math.max(1, hist.length - 2)) * 0.27;
           octx.beginPath();
           octx.moveTo(p1[0], p1[1]);
@@ -1104,9 +1120,16 @@ function Globe({
           pushTrail(flightHistRef.current, f.id, f.lon, f.lat);
           rendered.push({ f, px, py });
         }
-        // Trails first so markers sit on top.
+        // Trails first so markers sit on top. Prefer the server-seeded `track`
+        // array — it carries up to 10 past positions even on first render, so
+        // newcomers don't have to wait for local history to accumulate. Fall
+        // back to the client-side pushTrail history if the server didn't send
+        // one (older deployments or transient gaps).
         const trailCol = isDark ? 'rgba(255,255,255,0)' : 'rgba(30,30,40,0)';
-        for (const { f } of rendered) drawTrail(flightHistRef.current.get(f.id), trailCol);
+        for (const { f } of rendered) {
+          const hist = (f.track && f.track.length >= 2) ? f.track : flightHistRef.current.get(f.id);
+          drawTrail(hist, trailCol);
+        }
         // Now the plane icons + hit regions.
         for (const { f, px, py } of rendered) {
           drawPlane(px, py, f.hdg, scale);
@@ -1160,7 +1183,9 @@ function Globe({
             const r = parseInt(col.slice(1,3),16), g=parseInt(col.slice(3,5),16), b=parseInt(col.slice(5,7),16);
             base = `rgba(${r},${g},${b},0)`;
           }
-          drawTrail(shipHistRef.current.get(s.mmsi), base);
+          // Server-seeded track preferred; falls back to client accumulation.
+          const hist = (s.track && s.track.length >= 2) ? s.track : shipHistRef.current.get(s.mmsi);
+          drawTrail(hist, base);
         }
         for (const { s, px, py } of rendered) {
           const col = shipColor[s.category] || shipColor.other;
@@ -1356,7 +1381,23 @@ function Globe({
           {hover._layer === 'iss' && <span>ISS · ZARYA — {Math.round(hover.alt)} km</span>}
           {hover._layer === 'sat' && <span>{hover.name} — {Math.round(hover.alt)} km</span>}
           {hover._layer === 'flight' && <span>{hover.callsign || hover.reg} · FL{Math.round((hover.alt||0)/100)}</span>}
-          {hover._layer === 'ship' && <span>{hover.name || hover.mmsi} · {hover.sog != null ? Math.round(hover.sog) + ' kn' : 'underway'}</span>}
+          {hover._layer === 'ship' && (() => {
+            // Show a coloured dot + category label so the user can read the
+            // hull colour's meaning in-context — the legend in Layers is
+            // good for reference but nobody remembers it mid-scroll.
+            const shipCategoryColor = {
+              cargo:'#22d3ee', tanker:'#f59e0b', passenger:'#a78bfa',
+              fishing:'#34d399', highspeed:'#f472b6', service:'#94a3b8',
+              sail:'#60a5fa', other:'#94a3b8',
+            };
+            const cat = hover.category || 'other';
+            const col = shipCategoryColor[cat] || shipCategoryColor.other;
+            const label = cat[0].toUpperCase() + cat.slice(1);
+            return <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: col }}/>
+              <span>{label} · {hover.name || hover.mmsi} · {hover.sog != null ? Math.round(hover.sog) + ' kn' : 'underway'}</span>
+            </span>;
+          })()}
           {hover._layer === 'quake' && <span>M{hover.mag?.toFixed(1)} · {hover.place}</span>}
           {hover._layer === 'event' && <span>{hover.category} · {hover.title}</span>}
           {hover._layer === 'tsunami' && <span>Tsunami · {hover.location || hover.country} {hover.year || ''}</span>}

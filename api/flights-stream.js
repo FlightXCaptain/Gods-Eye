@@ -23,6 +23,11 @@ const STALE_MS = 5 * 60 * 1000;
 const REFRESH_COOLDOWN_MS = 2_000;    // cool-down between full cycles
 const SNAPSHOT_MS = 5_000;            // snapshot push cadence to browsers
 const REQUEST_STAGGER_MS = 110;        // delay between per-hotspot fetches
+// Per-flight track history. Storing the last N positions (as [lon, lat])
+// means clients that connect mid-flight see the trail already drawn instead
+// of a lone icon with no tail. Kept at 10 so payload growth stays modest.
+const TRACK_MAX = 10;
+const TRACK_MIN_DLL = 0.02;
 
 // Covers every continent + polar + major oceanic corridors. Each anchor
 // pulls aircraft within 250 nm; 250 nm ≈ 463 km, so dense anchors with
@@ -111,12 +116,23 @@ async function refresh() {
       if (a.lat == null || a.lon == null) continue;
       const hex = a.hex;
       if (!hex) continue;
+      const prev = FLIGHTS.get(hex);
+      const track = prev?.track ? prev.track.slice() : [];
+      // Append the new position only if the aircraft has actually moved —
+      // stationary reports (taxiing, holding pattern) shouldn't fill the
+      // buffer with dupes.
+      const last = track[track.length - 1];
+      if (!last || Math.abs(last[0] - a.lon) > TRACK_MIN_DLL || Math.abs(last[1] - a.lat) > TRACK_MIN_DLL) {
+        track.push([a.lon, a.lat]);
+        while (track.length > TRACK_MAX) track.shift();
+      }
       FLIGHTS.set(hex, {
         id: hex,
         callsign: (a.flight || '').trim() || a.r || hex,
         reg: a.r, type: a.t, desc: a.desc,
         lon: a.lon, lat: a.lat,
         alt: a.alt_baro, vel: a.gs, hdg: a.track,
+        track,
         kind: 'flight',
         _ts: now,
       });
