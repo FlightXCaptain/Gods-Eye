@@ -813,7 +813,11 @@ function App() {
   });
   useEffect(()=>{
     const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, tsunamis:false, wind:false };
-    const merged = { ...def, ...layers };
+    // Wind layer is force-off across sessions until we retune it. Users who
+    // had it enabled before get it turned off on the next load; they can
+    // toggle it back on within a session but it won't persist past reload
+    // until this override is removed.
+    const merged = { ...def, ...layers, wind: false };
     if (JSON.stringify(merged) !== JSON.stringify(layers)) setLayers(merged);
     localStorage.setItem('ge-layers', JSON.stringify(merged));
   }, [layers]);
