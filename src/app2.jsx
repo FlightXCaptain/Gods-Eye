@@ -385,7 +385,16 @@ function Dossier({ item, onClose }) {
         <div className="flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-accent-500 bpulse"/>
           <span className="text-[10px] uppercase font-mono opacity-60 tracking-widest">
-            {layer === 'iss' ? 'Orbital' : layer === 'flight' ? 'Aircraft' : layer === 'ship' ? 'Vessel' : layer === 'quake' ? 'Seismic' : layer==='event'?'Natural':layer==='sat'?'Satellite':'Object'}
+            {layer === 'iss' ? 'Orbital'
+              : layer === 'flight' ? 'Aircraft'
+              : layer === 'ship' ? 'Vessel'
+              : layer === 'quake' ? 'Seismic'
+              : layer === 'event' ? 'Natural'
+              : layer === 'sat' ? 'Satellite'
+              : layer === 'city' ? 'City'
+              : layer === 'country' ? 'Country'
+              : layer === 'lake' ? 'Hydrography'
+              : 'Object'}
           </span>
         </div>
         <button onClick={onClose} className="opacity-50 hover:opacity-100"><Icon name="x" className="w-3.5 h-3.5"/></button>
@@ -435,6 +444,37 @@ function Dossier({ item, onClose }) {
           <KV k="Type" v={item.category}/>
           <KV k="Updated" v={fmtTime(item.time)}/>
           {item.link && <a href={item.link} target="_blank" className="text-xs text-accent-500 underline">NASA EONET →</a>}
+        </>}
+        {layer === 'city' && <>
+          <div className="text-lg">{item.name}</div>
+          {item.country && <div className="text-sm opacity-70">{item.country}{item.admin1 ? ` · ${item.admin1}` : ''}</div>}
+          {item.pop != null && <KV k="Pop" v={Number(item.pop).toLocaleString()}/>}
+          {item.featurecla && <KV k="Class" v={item.featurecla}/>}
+          {(item.megacity || item.worldcity) && (
+            <div className="flex gap-1.5 flex-wrap">
+              {item.worldcity && <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-500">World city</span>}
+              {item.megacity && <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-500">Megacity</span>}
+            </div>
+          )}
+          <KV k="Position" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
+        {layer === 'country' && <>
+          <div className="text-lg">{item.name}</div>
+          {item.region && <div className="text-sm opacity-70">{item.continent}{item.region ? ` · ${item.region}` : ''}</div>}
+          {item.iso && <KV k="ISO" v={item.iso}/>}
+          {item.pop != null && item.pop > 0 && <KV k="Pop" v={Number(item.pop).toLocaleString()}/>}
+          {item.gdp != null && item.gdp > 0 && <KV k="GDP" v={`$${(item.gdp/1000).toFixed(1)} B`}/>}
+          <KV k="Clicked" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
+        {layer === 'lake' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Inland water body</div>
+          <KV k="Clicked" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
+          {item.name !== 'Unnamed lake' && (
+            <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+          )}
         </>}
       </div>
     </div>

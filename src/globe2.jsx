@@ -264,10 +264,11 @@ function Globe({
   const [hover, setHover] = useState(null);
   const landRef = useRef(null);
   const gridRef = useRef(null);
-  const countriesRef = useRef(null);  // internal country borders (mesh)
-  const riversRef = useRef(null);     // Natural Earth rivers 50m
-  const lakesRef = useRef(null);      // Natural Earth lakes 50m
-  const citiesRef = useRef(null);     // Natural Earth populated places 50m
+  const countriesRef = useRef(null);        // internal country borders (mesh) — drawing only
+  const countryFeaturesRef = useRef(null);  // NE admin_0 features — hit-test (has names)
+  const riversRef = useRef(null);           // Natural Earth rivers 50m
+  const lakesRef = useRef(null);            // Natural Earth lakes 50m
+  const citiesRef = useRef(null);           // Natural Earth populated places 50m
 
   // Load basemap layers. Land/graticule first so the globe paints immediately;
   // detail layers stream in and trigger re-draws as they arrive.
@@ -280,12 +281,19 @@ function Globe({
         dirtyBase.current = true;
       } catch (e) { console.warn('land topo fail', e); }
 
-      // Countries (borders only — mesh of shared edges).
+      // Countries — drawing uses topojson mesh (efficient dashed borders).
       try {
         const c = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json');
         countriesRef.current = topojson.mesh(c, c.objects.countries, (a, b) => a !== b);
         dirtyBase.current = true;
       } catch (e) { console.warn('countries topo fail', e); }
+
+      // Hit-test dataset — Natural Earth 110m has names and includes lake holes,
+      // so clicks inside lakes resolve to the lake, not the surrounding country.
+      try {
+        const hc = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/110m/cultural/ne_110m_admin_0_countries_lakes.json');
+        countryFeaturesRef.current = hc.features || [];
+      } catch (e) { console.warn('country hit-data load fail', e); }
 
       // Rivers, lakes, cities — Natural Earth via jsdelivr-hosted geojson.
       try {
@@ -377,14 +385,43 @@ function Globe({
 
     sel.call(drag);
 
-    // Wheel — zoom with accumulated target, smoothed in raf
-    const onWheel = (e) => {
-      e.preventDefault();
-      const delta = -e.deltaY;
-      const factor = Math.pow(1.0015, delta);
+    // Wheel — cursor-anchored zoom. Captures the lon/lat under the cursor, scales,
+    // then iteratively rotates to keep that point fixed. 3 iterations converges
+    // to sub-pixel on orthographic (inverting is nonlinear so one-shot can drift).
+    const zoomToward = (mx, my, factor) => {
       const min = Math.min(width, height) / 3.5;
       const max = Math.min(width, height) * 12;
-      targetScaleRef.current = Math.max(min, Math.min(max, targetScaleRef.current * factor));
+      const newScale = Math.max(min, Math.min(max, scaleRef.current * factor));
+      projection.rotate(rotRef.current).scale(scaleRef.current);
+      const anchor = projection.invert([mx, my]);
+      if (anchor && isFinite(anchor[0]) && isFinite(anchor[1])) {
+        projection.scale(newScale);
+        let rot = [...rotRef.current];
+        for (let i = 0; i < 3; i++) {
+          projection.rotate(rot);
+          const p = projection(anchor);
+          if (!p || !isFinite(p[0])) break;
+          const dx = mx - p[0], dy = my - p[1];
+          if (Math.abs(dx) < 0.3 && Math.abs(dy) < 0.3) break;
+          // Pixel → degree. At zoom level newScale, 1 radian ≈ newScale px at the centre.
+          const degPerPx = (180 / Math.PI) / newScale;
+          rot[0] += dx * degPerPx;
+          rot[1] -= dy * degPerPx;
+          rot[1] = Math.max(-89, Math.min(89, rot[1]));
+        }
+        rotRef.current = rot;
+        targetRotRef.current = rot;
+      }
+      scaleRef.current = newScale;
+      targetScaleRef.current = newScale;
+      dirtyBase.current = true;
+    };
+    const onWheel = (e) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const factor = Math.pow(1.0015, -e.deltaY);
+      zoomToward(mx, my, factor);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
 
@@ -400,16 +437,16 @@ function Globe({
     };
     el.addEventListener('dblclick', onDbl);
 
-    // Click — hit test markers
+    // Click — hit test markers, then cities, then fall through to country/lake
+    // polygon containment (expensive, so only on click).
     const onClick = (e) => {
-      // If user was dragging, skip
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       projection.rotate(rotRef.current).scale(scaleRef.current);
-      const pick = hitTest(mx, my);
+      let pick = hitTest(mx, my);
+      if (!pick) pick = geoHitAt(mx, my);
       if (!pick) return;
       if (pick._layer === 'cluster') {
-        // Zoom into cluster center
         targetRotRef.current = [-pick.lon, -pick.lat, 0];
         targetScaleRef.current = Math.min(scaleRef.current * 2.2, Math.min(width, height) * 12);
         return;
@@ -430,25 +467,31 @@ function Globe({
     el.addEventListener('mousemove', onMove);
     el.addEventListener('mouseleave', () => { hoverRef.current = null; });
 
-    // Touch pinch zoom
-    let pinchStartDist = 0, pinchStartScale = scaleRef.current;
+    // Touch pinch zoom — anchored at the midpoint between the two fingers so
+    // the zoom feels like it's happening where the user is pinching, not at
+    // the centre of the canvas.
+    let pinchLastDist = 0;
     const onTouchStart = (e) => {
       if (e.touches.length === 2) {
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
-        pinchStartDist = Math.hypot(dx, dy);
-        pinchStartScale = scaleRef.current;
+        pinchLastDist = Math.hypot(dx, dy);
       }
     };
     const onTouchMove = (e) => {
       if (e.touches.length === 2) {
         e.preventDefault();
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const rect = el.getBoundingClientRect();
+        const x1 = e.touches[0].clientX, y1 = e.touches[0].clientY;
+        const x2 = e.touches[1].clientX, y2 = e.touches[1].clientY;
+        const dx = x1 - x2, dy = y1 - y2;
         const d = Math.hypot(dx, dy);
-        const min = Math.min(width, height) / 3.5;
-        const max = Math.min(width, height) * 12;
-        targetScaleRef.current = Math.max(min, Math.min(max, pinchStartScale * (d/pinchStartDist)));
+        if (pinchLastDist > 0) {
+          const midX = (x1 + x2) / 2 - rect.left;
+          const midY = (y1 + y2) / 2 - rect.top;
+          zoomToward(midX, midY, d / pinchLastDist);
+        }
+        pinchLastDist = d;
       }
     };
     el.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -466,9 +509,13 @@ function Globe({
   }, [width, height, projection, onPickMarker]);
 
   const hitRegionsRef = useRef([]);
+  // City hit regions are rebuilt with the base canvas (only redraws on
+  // rotation/zoom change), so they persist between overlay frames and don't
+  // need to be pushed by the overlay draw.
+  const cityHitsRef = useRef([]);
 
   function hitTest(mx, my) {
-    // Iterate in reverse draw order (last drawn = topmost)
+    // Overlay markers first (data layers — last drawn = topmost).
     const regions = hitRegionsRef.current;
     let best = null, bestD = Infinity;
     for (let i = regions.length - 1; i >= 0; i--) {
@@ -478,7 +525,52 @@ function Globe({
       const hitR = r.radius || 8;
       if (d2 < hitR*hitR && d2 < bestD) { bestD = d2; best = r; }
     }
+    if (best) return best.payload;
+    // Then cities (cheap — point-distance check).
+    const cities = cityHitsRef.current;
+    for (let i = cities.length - 1; i >= 0; i--) {
+      const c = cities[i];
+      const dx = c.x - mx, dy = c.y - my;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < 8*8 && d2 < bestD) { bestD = d2; best = c; }
+    }
     return best?.payload || null;
+  }
+
+  // Expensive polygon hit test — only invoked on click, never on hover.
+  // Returns a country feature or a lake feature, preferring lakes because
+  // admin_0_countries_lakes already has lake holes cut out of countries.
+  function geoHitAt(mx, my) {
+    projection.rotate(rotRef.current).scale(scaleRef.current);
+    const ll = projection.invert([mx, my]);
+    if (!ll || !isFinite(ll[0]) || !isFinite(ll[1])) return null;
+    // Lakes first — they're physically on top of countries visually.
+    if (lakesRef.current?.features) {
+      for (const f of lakesRef.current.features) {
+        if (d3.geoContains(f, ll)) {
+          const n = f.properties?.name;
+          return { _layer: 'lake', name: n || 'Unnamed lake', lon: ll[0], lat: ll[1] };
+        }
+      }
+    }
+    if (countryFeaturesRef.current) {
+      for (const f of countryFeaturesRef.current) {
+        if (d3.geoContains(f, ll)) {
+          const p = f.properties || {};
+          return {
+            _layer: 'country',
+            name: p.NAME || p.ADMIN || p.name || 'Unknown',
+            iso: p.ISO_A2 || p.iso_a2 || null,
+            continent: p.CONTINENT || p.continent || null,
+            region: p.SUBREGION || p.subregion || null,
+            pop: p.POP_EST || p.pop_est || null,
+            gdp: p.GDP_MD || p.gdp_md || null,
+            lon: ll[0], lat: ll[1],
+          };
+        }
+      }
+    }
+    return null;
   }
 
   function visibleOn(proj, lon, lat) {
@@ -632,7 +724,8 @@ function Globe({
         }
 
         // Cities — zoom ≥ 1.8, filtered by SCALERANK (0 = biggest). Higher zoom
-        // reveals smaller cities. Dot + optional label.
+        // reveals smaller cities. Dot + optional label. Also builds hit regions.
+        cityHitsRef.current = [];
         if (citiesRef.current && zoomB >= 1.8) {
           const rankCap =
             zoomB >= 6 ? 10 :
@@ -654,6 +747,20 @@ function Globe({
             const r = sr <= 1 ? 2.6 : sr <= 3 ? 2.1 : 1.6;
             bctx.beginPath(); bctx.arc(pt[0], pt[1], r, 0, Math.PI*2);
             bctx.fill(); bctx.stroke();
+            cityHitsRef.current.push({
+              x: pt[0], y: pt[1],
+              payload: {
+                _layer: 'city',
+                name: p.name || p.NAME || 'Unknown',
+                country: p.adm0name || p.ADM0NAME || '',
+                admin1: p.adm1name || '',
+                pop: p.pop_max ?? p.pop_min ?? null,
+                featurecla: p.featurecla || '',
+                megacity: !!p.megacity,
+                worldcity: !!p.worldcity,
+                lon, lat,
+              },
+            });
             // Label only for top cities and only when zoomed enough to read.
             if (zoomB >= 2.4 && sr <= rankCap - 2) {
               const name = p.name || p.NAME || '';
@@ -1116,6 +1223,7 @@ function Globe({
           {hover._layer === 'quake' && <span>M{hover.mag?.toFixed(1)} · {hover.place}</span>}
           {hover._layer === 'event' && <span>{hover.category} · {hover.title}</span>}
           {hover._layer === 'tsunami' && <span>Tsunami · {hover.location || hover.country} {hover.year || ''}</span>}
+          {hover._layer === 'city' && <span>{hover.name}{hover.country ? ` · ${hover.country}` : ''}</span>}
           {hover._layer === 'cluster' && <span>{hover.count} {hover.layer}{hover.count>1?'s':''} — click to zoom</span>}
           {hover._layer !== 'cluster' && (() => {
             // Live feeds (flights, sats, iss): show "live"; time-stamped
