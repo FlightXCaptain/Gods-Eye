@@ -289,6 +289,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) 
     ['quakes','Seismic',  'quake',   '#fb923c'],
     ['events','Natural events', 'fire', '#ef4444'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
+    ['wind','Wind flow',  'aurora',  '#60a5fa'],
     ['tsunamis','Tsunami archive', 'tsunami', '#22d3ee'],
   ];
   return (
@@ -760,7 +761,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, tsunamis:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, tsunamis:false, wind:false };
     const merged = { ...def, ...layers };
     if (JSON.stringify(merged) !== JSON.stringify(layers)) setLayers(merged);
     localStorage.setItem('ge-layers', JSON.stringify(merged));
