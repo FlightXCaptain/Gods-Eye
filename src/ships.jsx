@@ -22,19 +22,28 @@
     return 'other';
   }
 
-  let ws = null, reconnectTimer = null, reconnectDelay = 2000;
+  // AISStream free tier aggressively rate-limits repeated handshakes. Start
+  // with a patient 15s backoff and cap at 5min so we don't keep tripping 429s
+  // on every page load / tab reopen.
+  let ws = null, reconnectTimer = null, reconnectDelay = 15000;
+  const RECONNECT_CAP = 5 * 60 * 1000;
+
+  let msgCount = 0;
+  let openedAtLeastOnce = false;
 
   function connect() {
     if (!window.API_KEYS?.AISSTREAM) {
-      console.warn('[ships] no AISStream API key');
+      console.warn('[ships] no AISStream API key — skipping websocket');
       return;
     }
+    console.log('[ships] connecting to AISStream…');
     try { ws = new WebSocket('wss://stream.aisstream.io/v0/stream'); }
-    catch (e) { scheduleReconnect(); return; }
+    catch (e) { console.warn('[ships] WS ctor threw', e); scheduleReconnect(); return; }
 
     ws.onopen = () => {
-      reconnectDelay = 2000;
-      // Whole globe — single bounding box, per AISStream docs.
+      reconnectDelay = 15000;
+      openedAtLeastOnce = true;
+      console.log('[ships] WS open — subscribing globally');
       ws.send(JSON.stringify({
         APIKey: window.API_KEYS.AISSTREAM,
         BoundingBoxes: [[[-90, -180], [90, 180]]],
@@ -45,6 +54,14 @@
     ws.onmessage = (ev) => {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
+      // AISStream auth errors arrive as plain objects without MetaData.
+      if (m.error || m.Error) {
+        console.warn('[ships] AIS error frame:', m.error || m.Error);
+        return;
+      }
+      msgCount++;
+      if (msgCount === 1) console.log('[ships] first message received');
+      if (msgCount % 500 === 0) console.log(`[ships] ${msgCount} msgs, ${SHIPS.size} unique vessels`);
       const mmsi = m.MetaData?.MMSI;
       if (!mmsi) return;
       const prev = SHIPS.get(mmsi) || { mmsi };
@@ -76,14 +93,24 @@
       }
     };
 
-    ws.onclose = () => scheduleReconnect();
-    ws.onerror = () => { try { ws.close(); } catch {} };
+    ws.onclose = (ev) => {
+      console.warn('[ships] WS closed', ev.code, ev.reason || '(no reason)');
+      scheduleReconnect();
+    };
+    ws.onerror = (e) => {
+      console.warn('[ships] WS error', e?.message || '(no message)');
+      try { ws.close(); } catch {}
+    };
   }
 
   function scheduleReconnect() {
     clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(30000, reconnectDelay * 1.6);
+    // If the handshake never opened, the most likely cause is a 429 from
+    // AISStream — wait extra long in that case to let the limit clear.
+    const delay = openedAtLeastOnce ? reconnectDelay : Math.max(60000, reconnectDelay);
+    console.log(`[ships] reconnecting in ${Math.round(delay/1000)}s`);
+    reconnectTimer = setTimeout(connect, delay);
+    reconnectDelay = Math.min(RECONNECT_CAP, reconnectDelay * 2);
   }
 
   // Prune stale ships + broadcast every 2s

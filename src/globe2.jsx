@@ -264,17 +264,47 @@ function Globe({
   const [hover, setHover] = useState(null);
   const landRef = useRef(null);
   const gridRef = useRef(null);
+  const countriesRef = useRef(null);  // internal country borders (mesh)
+  const riversRef = useRef(null);     // Natural Earth rivers 50m
+  const lakesRef = useRef(null);      // Natural Earth lakes 50m
+  const citiesRef = useRef(null);     // Natural Earth populated places 50m
 
-  // Load topo once
+  // Load basemap layers. Land/graticule first so the globe paints immediately;
+  // detail layers stream in and trigger re-draws as they arrive.
   useEffect(() => {
     (async () => {
       try {
         const t = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json');
         landRef.current = topojson.feature(t, t.objects.land);
-        const graticule = d3.geoGraticule().step([15,15]);
-        gridRef.current = graticule();
+        gridRef.current = d3.geoGraticule().step([15,15])();
         dirtyBase.current = true;
-      } catch (e) { console.warn('topojson load fail', e); }
+      } catch (e) { console.warn('land topo fail', e); }
+
+      // Countries (borders only — mesh of shared edges).
+      try {
+        const c = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json');
+        countriesRef.current = topojson.mesh(c, c.objects.countries, (a, b) => a !== b);
+        dirtyBase.current = true;
+      } catch (e) { console.warn('countries topo fail', e); }
+
+      // Rivers, lakes, cities — Natural Earth via jsdelivr-hosted geojson.
+      try {
+        const r = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/50m/physical/ne_50m_rivers_lake_centerlines.json');
+        riversRef.current = r;
+        dirtyBase.current = true;
+      } catch (e) { console.warn('rivers load fail', e); }
+
+      try {
+        const l = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/50m/physical/ne_50m_lakes.json');
+        lakesRef.current = l;
+        dirtyBase.current = true;
+      } catch (e) { console.warn('lakes load fail', e); }
+
+      try {
+        const p = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/50m/cultural/ne_50m_populated_places_simple.json');
+        citiesRef.current = p;
+        dirtyBase.current = true;
+      } catch (e) { console.warn('cities load fail', e); }
     })();
   }, []);
 
@@ -543,28 +573,100 @@ function Globe({
 
       projection.rotate(rotRef.current).scale(scaleRef.current);
 
-      // Draw base (only when dirty)
+      // Draw base (only when dirty) — uses current zoom for LOD decisions below.
       if (dirtyBase.current) {
         bctx.clearRect(0,0,width,height);
         const path = d3.geoPath(projection, bctx);
         const isDark = theme === 'dark';
+        const baseScaleB = Math.min(width, height) / 2.1;
+        const zoomB = scaleRef.current / baseScaleB;
+
         // Ocean disk
         bctx.beginPath(); path({type:'Sphere'});
         bctx.fillStyle = isDark ? 'rgba(20,25,40,0.35)' : 'rgba(240,245,255,0.55)';
         bctx.fill();
-        // Graticule
+
+        // Graticule — thinner/dimmer as we zoom in so detail layers breathe.
         if (gridRef.current) {
           bctx.beginPath(); path(gridRef.current);
-          bctx.strokeStyle = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(20,30,60,0.08)';
+          const gridAlpha = isDark ? (zoomB > 2.2 ? 0.04 : 0.07) : (zoomB > 2.2 ? 0.05 : 0.09);
+          bctx.strokeStyle = isDark ? `rgba(255,255,255,${gridAlpha})` : `rgba(20,30,60,${gridAlpha})`;
           bctx.lineWidth = 0.5; bctx.stroke();
         }
-        // Land — wireframe
+
+        // Lakes (filled) — zoom ≥ 1.2. Painted before land outline so the land
+        // stroke still reads over the inset water bodies.
+        if (lakesRef.current && zoomB >= 1.2) {
+          bctx.beginPath(); path(lakesRef.current);
+          bctx.fillStyle = isDark ? 'rgba(56,189,248,0.14)' : 'rgba(14,116,144,0.12)';
+          bctx.fill();
+          bctx.strokeStyle = isDark ? 'rgba(56,189,248,0.3)' : 'rgba(14,116,144,0.35)';
+          bctx.lineWidth = 0.5; bctx.stroke();
+        }
+
+        // Land — wireframe outline (the signature look)
         if (landRef.current) {
           bctx.beginPath(); path(landRef.current);
           bctx.strokeStyle = isDark ? 'rgba(244,63,94,0.55)' : 'rgba(244,63,94,0.75)';
           bctx.lineWidth = 0.9; bctx.stroke();
         }
-        // Sphere edge
+
+        // Country borders — always visible but fade up with zoom.
+        if (countriesRef.current) {
+          const ca = Math.min(0.55, 0.12 + (zoomB - 1) * 0.22);
+          bctx.beginPath(); path(countriesRef.current);
+          bctx.strokeStyle = isDark ? `rgba(226,232,240,${ca})` : `rgba(30,41,59,${ca * 0.9})`;
+          bctx.lineWidth = zoomB >= 2 ? 0.65 : 0.5;
+          bctx.setLineDash([2, 2]);
+          bctx.stroke();
+          bctx.setLineDash([]);
+        }
+
+        // Rivers — zoom ≥ 1.5. Thin cyan hairlines.
+        if (riversRef.current && zoomB >= 1.5) {
+          const ra = Math.min(0.65, 0.15 + (zoomB - 1.5) * 0.3);
+          bctx.beginPath(); path(riversRef.current);
+          bctx.strokeStyle = isDark ? `rgba(125,211,252,${ra})` : `rgba(14,165,233,${ra})`;
+          bctx.lineWidth = 0.55;
+          bctx.stroke();
+        }
+
+        // Cities — zoom ≥ 1.8, filtered by SCALERANK (0 = biggest). Higher zoom
+        // reveals smaller cities. Dot + optional label.
+        if (citiesRef.current && zoomB >= 1.8) {
+          const rankCap =
+            zoomB >= 6 ? 10 :
+            zoomB >= 4 ? 8 :
+            zoomB >= 3 ? 6 :
+            zoomB >= 2.4 ? 4 : 2;
+          bctx.fillStyle = isDark ? 'rgba(253,224,71,0.95)' : 'rgba(180,83,9,0.95)';
+          bctx.strokeStyle = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.85)';
+          bctx.lineWidth = 0.8;
+          bctx.font = `500 ${zoomB >= 3 ? 10 : 9}px Geist Mono, monospace`;
+          bctx.textBaseline = 'middle';
+          for (const f of citiesRef.current.features) {
+            const p = f.properties || {};
+            const sr = p.scalerank ?? p.SCALERANK ?? 99;
+            if (sr > rankCap) continue;
+            const [lon, lat] = f.geometry.coordinates;
+            if (!visibleOn(projection, lon, lat)) continue;
+            const pt = projection([lon, lat]); if (!pt) continue;
+            const r = sr <= 1 ? 2.6 : sr <= 3 ? 2.1 : 1.6;
+            bctx.beginPath(); bctx.arc(pt[0], pt[1], r, 0, Math.PI*2);
+            bctx.fill(); bctx.stroke();
+            // Label only for top cities and only when zoomed enough to read.
+            if (zoomB >= 2.4 && sr <= rankCap - 2) {
+              const name = p.name || p.NAME || '';
+              if (name) {
+                bctx.fillStyle = isDark ? 'rgba(255,255,255,0.85)' : 'rgba(15,23,42,0.9)';
+                bctx.fillText(name, pt[0] + r + 3, pt[1]);
+                bctx.fillStyle = isDark ? 'rgba(253,224,71,0.95)' : 'rgba(180,83,9,0.95)';
+              }
+            }
+          }
+        }
+
+        // Sphere edge — last so it always tops the base stack.
         bctx.beginPath(); path({type:'Sphere'});
         bctx.strokeStyle = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.15)';
         bctx.lineWidth = 1; bctx.stroke();
