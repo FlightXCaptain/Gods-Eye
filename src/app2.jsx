@@ -818,24 +818,33 @@ function App() {
   // Time cursor
   const [nowCursor, setNowCursor] = useState(Date.now());
   const [playing, setPlaying] = useState(false);
-  // Loading overlay — visible only during the very first seconds while the
-  // SSE streams connect and the initial fetches land. Self-hides on either
-  // condition (first data arrived, or 4 s hard timeout) to avoid overstaying.
+  // Loading overlay — visible during initial data arrival. Waits until at
+  // least 4 independent sources have returned something before dismissing,
+  // so the globe feels populated when the overlay disappears rather than
+  // blank-with-one-layer. Hard timeout at 12 s as a safety net in case a
+  // source is slow or offline.
   const [booting, setBooting] = useState(true);
   useEffect(() => {
     if (!booting) return;
-    const id = setTimeout(() => setBooting(false), 4000);
+    const id = setTimeout(() => setBooting(false), 12000);
     return () => clearTimeout(id);
   }, [booting]);
-  // Drop the overlay the moment any substantive dataset is available.
+  // Drop the overlay when at least 4 substantive datasets have arrived.
   useEffect(() => {
     if (!booting) return;
-    if ((data.flights?.length || 0) > 0
-     || (data.ships?.length || 0) > 0
-     || (data.quakes?.length || 0) > 0) {
+    let populated = 0;
+    if ((data.flights?.length || 0) > 0) populated++;
+    if ((data.ships?.length || 0) > 0) populated++;
+    if ((data.quakes?.length || 0) > 0) populated++;
+    if ((data.events?.length || 0) > 0) populated++;
+    if ((data.sats?.length || 0) > 0) populated++;
+    if ((data.aurora?.length || 0) > 0) populated++;
+    if (data.iss) populated++;
+    if (kp) populated++;
+    if (populated >= 4) {
       setBooting(false);
     }
-  }, [booting, data.flights, data.ships, data.quakes]);
+  }, [booting, data.flights, data.ships, data.quakes, data.events, data.sats, data.aurora, data.iss, kp]);
   const [playSpeed, setPlaySpeed] = useState(14400); // multiplier — "4h/s"
   // When live, keep cursor at Date.now()
   useEffect(() => {
