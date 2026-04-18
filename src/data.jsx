@@ -7,9 +7,16 @@ async function safeFetch(url, opts = {}, timeoutMs = 15000) {
     const res = await fetch(url, { ...opts, signal: ctrl.signal });
     clearTimeout(t);
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('json')) return await res.json();
-    return await res.text();
+    const text = await res.text();
+    // NASA's EONET currently serves JSON with `Content-Type: application/rss+xml`
+    // (a server-config bug on their side). Don't rely on the header — try
+    // JSON.parse first and fall back to raw text only if parsing genuinely fails.
+    if (!text) return null;
+    const firstNonWs = text.trimStart()[0];
+    if (firstNonWs === '{' || firstNonWs === '[') {
+      try { return JSON.parse(text); } catch { /* fall through */ }
+    }
+    return text;
   } catch (e) { return null; }
 }
 
