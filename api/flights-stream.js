@@ -20,13 +20,13 @@ export const config = { runtime: 'nodejs', maxDuration: 300 };
 const FLIGHTS = new Map();            // hex -> flight record
 const SUBSCRIBERS = new Set();        // Set<(event, data) => void>
 const STALE_MS = 5 * 60 * 1000;
-const REFRESH_MS = 12_000;            // server upstream poll cadence
-const SNAPSHOT_MS = 6_000;            // snapshot push cadence to browsers
-const REQUEST_STAGGER_MS = 150;        // delay between per-hotspot fetches
+const REFRESH_COOLDOWN_MS = 2_000;    // cool-down between full cycles
+const SNAPSHOT_MS = 5_000;            // snapshot push cadence to browsers
+const REQUEST_STAGGER_MS = 110;        // delay between per-hotspot fetches
 
 // Covers every continent + polar + major oceanic corridors. Each anchor
-// pulls aircraft within 250 nm; 250 nm ≈ 463 km, so 56 anchors with some
-// overlap give effectively global coverage.
+// pulls aircraft within 250 nm; 250 nm ≈ 463 km, so dense anchors with
+// overlap give effectively global coverage including mid-ocean routes.
 const HOTSPOTS = [
   // Europe
   [51.5,-0.12],[50.1,8.68],[41.9,12.5],[37.98,23.7],[55.75,37.6],
@@ -49,6 +49,25 @@ const HOTSPOTS = [
   [13.75,100.49],[14.6,120.98],[-6.2,106.85],[1.35,103.8],[10.82,106.63],
   // Oceania / Pacific
   [-33.86,151.2],[-37.81,144.96],[-36.85,174.76],[21.31,-157.86],
+
+  // ── Ocean corridors — fill the mid-ocean gaps where long-haul flights
+  //    otherwise vanished between coastal hotspots. Each ~500-900 nm from
+  //    the nearest land anchor. ───────────────────────────────────────
+  // North Atlantic (NYC ↔ Europe routes)
+  [50,-30],[45,-45],[40,-55],[55,-40],
+  // Mid / South Atlantic
+  [20,-40],[0,-25],[-20,-15],[-35,-25],
+  // North Pacific (Asia ↔ NA great-circle + mid-lat)
+  [45,-160],[40,-175],[50,-180],[35,-170],[30,-150],
+  // Central / South Pacific
+  [10,-150],[0,-170],[-20,-150],[-10,170],[-25,-130],
+  // Indian Ocean
+  [0,75],[-15,75],[-25,90],[10,65],[-35,80],
+  // Southern Ocean / Antarctic approaches
+  [-55,140],[-55,-100],[-60,60],
+  // Arctic polar routes
+  [80,-100],[85,0],[75,100],
+
   // Polar / remote
   [-54.8,-68.3],[78.22,15.65],
 ];
@@ -59,7 +78,7 @@ const FLIGHT_HOSTS = [
   'https://opendata.adsb.fi',
 ];
 
-let refreshTimer = null;
+let refreshRunning = false;
 let snapshotTimer = null;
 
 async function safeFetch(url, timeoutMs = 8000) {
@@ -111,12 +130,21 @@ async function refresh() {
   }
 }
 
-function startBackgroundJobs() {
-  if (!refreshTimer) {
-    refresh().catch(() => {});
-    refreshTimer = setInterval(() => { refresh().catch(() => {}); }, REFRESH_MS);
-    refreshTimer.unref?.();
+async function refreshLoop() {
+  if (refreshRunning) return;
+  refreshRunning = true;
+  // Continuous poll loop — as soon as one hotspot pass finishes, sleep a
+  // short cool-down and start the next. With ~85 hotspots × 110ms stagger
+  // that's ~9.5s per cycle, plus the 2s cool-down = ~11s between same-plane
+  // refreshes. Fast enough that airliners don't stutter visibly.
+  while (true) {
+    try { await refresh(); } catch {}
+    await new Promise(r => setTimeout(r, REFRESH_COOLDOWN_MS));
   }
+}
+
+function startBackgroundJobs() {
+  if (!refreshRunning) refreshLoop();
   if (!snapshotTimer) {
     snapshotTimer = setInterval(() => {
       if (!SUBSCRIBERS.size) return;
