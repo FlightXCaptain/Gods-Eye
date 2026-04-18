@@ -250,7 +250,7 @@ function classifyLOD(points, cellPx = 36) {
 
 function Globe({
   width, height, data, nowCursor, onPickMarker, focusTarget,
-  theme, animationIntensity = 0.7, layers,
+  theme, animationIntensity = 0.7, layers, autoRotate = true,
 }) {
   const wrapRef = useRef(null);
   const baseRef = useRef(null);   // land (cached, redraws on rotation)
@@ -264,12 +264,45 @@ function Globe({
   const [hover, setHover] = useState(null);
   const landRef = useRef(null);
   const gridRef = useRef(null);
+  // Motion trails. For each moving entity (keyed by stable ID) we keep the last
+  // TRAIL_MAX lon/lat samples. Only pushed when the item has actually moved
+  // (> TRAIL_MIN_DLL degrees) so stationary vessels don't accumulate dupes.
+  const TRAIL_MAX = 5;
+  const TRAIL_MIN_DLL = 0.005;
+  const TRAIL_STALE_MS = 10 * 60 * 1000;
+  const flightHistRef = useRef(new Map());
+  const shipHistRef   = useRef(new Map());
+  const satHistRef    = useRef(new Map());
+  const issHistRef    = useRef([]);
+  // Auto-rotate: resumes after 30s of no user interaction. Starts active on
+  // load (lastInteraction = 0, so the idle delta is trivially large).
+  const lastInteractionRef = useRef(0);
+  const lastFrameMsRef = useRef(null);
+  const AUTO_ROTATE_IDLE_MS = 30 * 1000;
+  const AUTO_ROTATE_DEG_PER_SEC = 4;
   const countriesRef = useRef(null);        // internal country borders (mesh) — drawing only
   const countryFeaturesRef = useRef(null);  // NE admin_0 features — hit-test (has names)
   const statesRef = useRef(null);           // NE admin_1 state/province lines (zoom ≥ 2.5)
   const riversRef = useRef(null);           // Natural Earth rivers 50m
   const lakesRef = useRef(null);            // Natural Earth lakes 50m
   const citiesRef = useRef(null);           // Natural Earth populated places 50m
+
+  // Periodic prune of trail history — drop entries whose newest point is older
+  // than TRAIL_STALE_MS. Without this, the flight/ship Maps grow unbounded as
+  // aircraft land or vessels go dark.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const cutoff = Date.now() - TRAIL_STALE_MS;
+      for (const map of [flightHistRef.current, shipHistRef.current, satHistRef.current]) {
+        for (const [k, arr] of map) {
+          if (!arr.length || arr[arr.length - 1].t < cutoff) map.delete(k);
+        }
+      }
+      const iss = issHistRef.current;
+      while (iss.length && iss[0].t < cutoff) iss.shift();
+    }, 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Load basemap layers. Land/graticule first so the globe paints immediately;
   // detail layers stream in and trigger re-draws as they arrive.
@@ -351,6 +384,8 @@ function Globe({
   useEffect(() => {
     const el = wrapRef.current; if (!el) return;
     const sel = d3.select(el);
+    // Any input from the user bumps lastInteraction so auto-rotate pauses.
+    const markInteraction = () => { lastInteractionRef.current = Date.now(); };
     // Velocity tracking for inertia
     let vx = 0, vy = 0, lastMove = 0, lastMx = 0, lastMy = 0;
     let dragging = false;
@@ -358,6 +393,7 @@ function Globe({
     const drag = d3.drag()
       .on('start', (ev) => {
         dragging = true;
+        markInteraction();
         lastMove = performance.now();
         lastMx = ev.x; lastMy = ev.y;
         vx = 0; vy = 0;
@@ -365,6 +401,7 @@ function Globe({
         targetRotRef.current = [...rotRef.current];
       })
       .on('drag', (ev) => {
+        markInteraction();
         const now = performance.now();
         const dt = Math.max(1, now - lastMove);
         // Sensitivity scales inversely with zoom
@@ -427,6 +464,7 @@ function Globe({
     };
     const onWheel = (e) => {
       e.preventDefault();
+      markInteraction();
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       const factor = Math.pow(1.0015, -e.deltaY);
@@ -436,6 +474,7 @@ function Globe({
 
     // Double click — zoom in to point
     const onDbl = (e) => {
+      markInteraction();
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       projection.rotate(rotRef.current).scale(scaleRef.current);
@@ -449,6 +488,7 @@ function Globe({
     // Click — hit test markers, then cities, then fall through to country/lake
     // polygon containment (expensive, so only on click).
     const onClick = (e) => {
+      markInteraction();
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
       projection.rotate(rotRef.current).scale(scaleRef.current);
@@ -482,6 +522,7 @@ function Globe({
     let pinchLastDist = 0;
     const onTouchStart = (e) => {
       if (e.touches.length === 2) {
+        markInteraction();
         const dx = e.touches[0].clientX - e.touches[1].clientX;
         const dy = e.touches[0].clientY - e.touches[1].clientY;
         pinchLastDist = Math.hypot(dx, dy);
@@ -490,6 +531,7 @@ function Globe({
     const onTouchMove = (e) => {
       if (e.touches.length === 2) {
         e.preventDefault();
+        markInteraction();
         const rect = el.getBoundingClientRect();
         const x1 = e.touches[0].clientX, y1 = e.touches[0].clientY;
         const x2 = e.touches[1].clientX, y2 = e.touches[1].clientY;
@@ -655,6 +697,21 @@ function Globe({
     dirtyBase.current = true;
 
     const tick = () => {
+      const tickNow = performance.now();
+      const frameDt = lastFrameMsRef.current ? (tickNow - lastFrameMsRef.current) / 1000 : 0;
+      lastFrameMsRef.current = tickNow;
+
+      // Auto-rotate when idle. Skips when focusTarget is locking the view to
+      // a point — otherwise we'd fight the fly-to animation.
+      if (autoRotate && !focusTarget && frameDt > 0 && frameDt < 0.5
+          && Date.now() - lastInteractionRef.current >= AUTO_ROTATE_IDLE_MS) {
+        const r = rotRef.current;
+        const nx = r[0] + AUTO_ROTATE_DEG_PER_SEC * frameDt;
+        rotRef.current = [nx, r[1], 0];
+        targetRotRef.current = [...rotRef.current];
+        dirtyBase.current = true;
+      }
+
       // Smooth toward target (lerp)
       const R = rotRef.current, T = targetRotRef.current;
       // angular shortest path for longitude
@@ -809,7 +866,41 @@ function Globe({
         hitRegionsRef.current.push({ x, y, radius, payload: { ...payload, _layer: layer } });
       };
       const now = performance.now();
+      const nowMs = Date.now();
       const isDark = theme === 'dark';
+
+      // Trail helpers. `pushTrail` dedupes stationary updates; `drawTrail`
+      // renders a fading polyline using the projection (optional altitude for
+      // satellites) and returns the final [px, py] so the caller can place the
+      // marker at the current position.
+      const pushTrail = (map, id, lon, lat) => {
+        const arr = map.get(id);
+        if (!arr) { map.set(id, [{ lon, lat, t: nowMs }]); return; }
+        const last = arr[arr.length - 1];
+        if (Math.abs(last.lon - lon) < TRAIL_MIN_DLL && Math.abs(last.lat - lat) < TRAIL_MIN_DLL) {
+          last.t = nowMs;
+          return;
+        }
+        arr.push({ lon, lat, t: nowMs });
+        if (arr.length > TRAIL_MAX) arr.shift();
+      };
+      const drawTrail = (hist, color, altKm) => {
+        if (!hist || hist.length < 2) return;
+        const project = altKm ? ((lon, lat) => projectAtAltitude(projection, lon, lat, altKm)) : ((lon, lat) => projection([lon, lat]));
+        for (let i = 0; i < hist.length - 1; i++) {
+          const p1 = project(hist[i].lon, hist[i].lat);
+          const p2 = project(hist[i+1].lon, hist[i+1].lat);
+          if (!p1 || !p2) continue;
+          // Alpha ramps from oldest (0.08) to newest (0.35) — natural tail.
+          const a = 0.08 + (i / Math.max(1, hist.length - 2)) * 0.27;
+          octx.beginPath();
+          octx.moveTo(p1[0], p1[1]);
+          octx.lineTo(p2[0], p2[1]);
+          octx.strokeStyle = color.replace(/[\d.]+\)$/, a.toFixed(2) + ')');
+          octx.lineWidth = 0.7;
+          octx.stroke();
+        }
+      };
 
       // Aurora
       if (layers.aurora && data.aurora) {
@@ -956,11 +1047,10 @@ function Globe({
           zoom <= 2   ? 0.55 + (zoom - 1) * 0.2 :      // 0.55 → 0.75
           zoom <= 3   ? 0.75 + (zoom - 2) * 0.15 :     // 0.75 → 0.9
                          Math.min(1.0, 0.9 + (zoom - 3) * 0.05);
-        // Prefer higher-altitude aircraft per bin — cruising airliners read
-        // better than low-flying spotter planes, and a consistent altitude
-        // floor makes the visible fleet feel coherent.
+        // Prefer higher-altitude aircraft per bin.
         const sorted = data.flights.slice().sort((a, b) => (b.alt || 0) - (a.alt || 0));
         const seenFlight = new Set();
+        const rendered = [];
         for (const f of sorted) {
           if (!visibleOn(projection, f.lon, f.lat)) continue;
           const pt = projection([f.lon, f.lat]); if (!pt) continue;
@@ -968,6 +1058,15 @@ function Globe({
           const k = (Math.floor(px / flightCell) << 16) | (Math.floor(py / flightCell) & 0xffff);
           if (seenFlight.has(k)) continue;
           seenFlight.add(k);
+          // Record current position into this flight's trail.
+          pushTrail(flightHistRef.current, f.id, f.lon, f.lat);
+          rendered.push({ f, px, py });
+        }
+        // Trails first so markers sit on top.
+        const trailCol = isDark ? 'rgba(255,255,255,0)' : 'rgba(30,30,40,0)';
+        for (const { f } of rendered) drawTrail(flightHistRef.current.get(f.id), trailCol);
+        // Now the plane icons + hit regions.
+        for (const { f, px, py } of rendered) {
           drawPlane(px, py, f.hdg, scale);
           pushHit(px, py, Math.max(7, flightCell * 0.45), 'flight', f);
         }
@@ -990,6 +1089,7 @@ function Globe({
         const shipCell = Math.max(7, 11 / zoom);
         const seenShip = new Set();
         const shipScale = zoom >= 2 ? 1.0 : zoom >= 1.2 ? 0.85 : 0.7;
+        const rendered = [];
         for (const s of data.ships) {
           if (!visibleOn(projection, s.lon, s.lat)) continue;
           const pt = projection([s.lon, s.lat]); if (!pt) continue;
@@ -997,6 +1097,22 @@ function Globe({
           const k = (Math.floor(px / shipCell) << 16) | (Math.floor(py / shipCell) & 0xffff);
           if (seenShip.has(k)) continue;
           seenShip.add(k);
+          pushTrail(shipHistRef.current, s.mmsi, s.lon, s.lat);
+          rendered.push({ s, px, py });
+        }
+        // Trail colour matches the vessel category — the tail stays tonally
+        // consistent with the hull icon, so the motion reads at a glance.
+        for (const { s } of rendered) {
+          const col = shipColor[s.category] || shipColor.other;
+          // Convert hex `#rrggbb` → `rgba(r,g,b,0)` placeholder for the helper.
+          let base = col;
+          if (col.startsWith('#')) {
+            const r = parseInt(col.slice(1,3),16), g=parseInt(col.slice(3,5),16), b=parseInt(col.slice(5,7),16);
+            base = `rgba(${r},${g},${b},0)`;
+          }
+          drawTrail(shipHistRef.current.get(s.mmsi), base);
+        }
+        for (const { s, px, py } of rendered) {
           const col = shipColor[s.category] || shipColor.other;
           const hdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0);
           iconShip(octx, px, py, hdg, shipScale, col, shipStroke);
@@ -1071,6 +1187,16 @@ function Globe({
         const lod = classifyLOD(sPts, Math.max(14, 24/zoom));
         const satCol = isDark ? 'rgba(217,70,239,0.9)' : 'rgba(168,85,247,0.95)';
         const satDim = isDark ? 'rgba(217,70,239,0.55)' : 'rgba(168,85,247,0.65)';
+        // Satellite trails — full-mode sats only, to keep orbit arcs crisp
+        // without trailing every dim dot. Altitude-aware so the polyline sits
+        // at orbit height like the icon itself.
+        for (let i = 0; i < sPts.length; i++) {
+          const { s } = sPts[i];
+          if (lod[i].mode !== 'full') continue;
+          const id = s.norad || s.name;
+          pushTrail(satHistRef.current, id, s.lon, s.lat);
+          drawTrail(satHistRef.current.get(id), 'rgba(217,70,239,0)', s.alt || 0);
+        }
         for (let i = 0; i < sPts.length; i++) {
           const { px, py, s } = sPts[i];
           const { mode } = lod[i];
@@ -1099,9 +1225,18 @@ function Globe({
 
       // ISS — silhouette + pulse
       if (layers.iss && data.iss) {
+        // Push history whether or not the ISS is currently visible so the
+        // trail is ready the moment it rotates into view.
+        const issHist = issHistRef.current;
+        const last = issHist[issHist.length - 1];
+        if (!last || Math.abs(last.lon - data.iss.lon) >= TRAIL_MIN_DLL || Math.abs(last.lat - data.iss.lat) >= TRAIL_MIN_DLL) {
+          issHist.push({ lon: data.iss.lon, lat: data.iss.lat, t: nowMs });
+          if (issHist.length > TRAIL_MAX) issHist.shift();
+        }
         if (visibleOn(projection, data.iss.lon, data.iss.lat)) {
           const pt = projection([data.iss.lon, data.iss.lat]);
           if (pt) {
+            drawTrail(issHist, 'rgba(244,63,94,0)');
             const pulse = 0.5 + 0.5*Math.sin(now/400);
             octx.beginPath(); octx.arc(pt[0], pt[1], 11 + pulse*3, 0, Math.PI*2);
             octx.strokeStyle = `rgba(244,63,94,${0.4 + pulse*0.3})`;
