@@ -132,20 +132,24 @@ async function fetchEONET() {
     } else continue;
     // Normalise EONET timestamps to epoch ms at ingestion so downstream
     // filters can do cheap numeric comparisons instead of parsing ISO on
-    // every render. `time` is the MOST RECENT geometry point (for an
-    // active wildfire, that's today); `startTime` is the FIRST point
-    // (when the event was first detected). Globe filter uses both so
-    // long-running events stay visible throughout their lifecycle
-    // instead of only in the last 24 h after their most recent update.
+    // every render.
+    //   - `time`       — last geometry point (most recent known position)
+    //   - `startTime`  — first geometry point (when detected)
+    //   - `closedTime` — epoch ms when EONET marked the event closed, or
+    //                    null if it's still active. This is what lets us
+    //                    filter "currently active" independently of how
+    //                    recently the geometry has been updated (storms
+    //                    and fires often go days between updates).
     const timeMs = last.date ? new Date(last.date).getTime() : NaN;
     if (!isFinite(timeMs)) continue;
     const first = e.geometry?.[0];
     const startMs = first?.date ? new Date(first.date).getTime() : timeMs;
+    const closedMs = e.closed ? new Date(e.closed).getTime() : null;
     out.push({
       id: e.id, lon, lat, title: e.title,
       category: e.categories?.[0]?.title || 'Event',
       categoryId: e.categories?.[0]?.id || 'other',
-      time: timeMs, startTime: startMs,
+      time: timeMs, startTime: startMs, closedTime: closedMs,
       link: e.link, kind:'eonet',
     });
   }
