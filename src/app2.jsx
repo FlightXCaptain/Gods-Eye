@@ -408,7 +408,7 @@ function StatBar({ data, kp }) {
     { label: 'Ships',        short: 'Ships',   shortMobile: 'SHP', val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
     { label: 'Satellites',   short: 'Sats',    shortMobile: 'SAT', val: satCount.toLocaleString(),    glyph: 'sat',    color: '#d946ef', title: 'Orbital objects propagated from CelesTrak TLEs' },
     { label: 'Earthquakes',  short: 'Quakes',  shortMobile: 'SEI', val: quakeCount,                   glyph: 'quake',  color: '#fb923c', title: 'Seismic events in the last 24h (USGS)' },
-    { label: 'Natural events', short: 'Nature',shortMobile: 'NAT', val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Active storms, wildfires, volcanoes, ice (NASA EONET)' },
+    { label: 'Natural events', short: 'Nature',shortMobile: 'NAT', val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Storms, wildfires, volcanoes, ice with updates in the last 24h (NASA EONET)' },
     { label: 'Geomagnetic',  short: 'Kp',      shortMobile: 'Kp',  val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
   ];
   return (
@@ -1187,35 +1187,24 @@ function App() {
   }, []);
   const [tweaks, setTweaks] = useState(false);
 
-  // Point-event layers render with different semantics.
-  //
-  // Quakes: one-time events. A quake "happens" at quake.time — it's not
-  // ongoing. 24 h window centered on the cursor is right: live mode
-  // shows the last 24 h, scrub shows what was detected in the 24 h up
-  // to the cursor.
-  //
-  // EONET natural events: persistent. A wildfire starts on startTime and
-  // gets updated repeatedly until it's contained — event.time is only
-  // the LAST update. Filtering by time-within-24-h would drop active
-  // wildfires whose last position update was 25+ hours ago, which is
-  // exactly what made 200+ events in the ticker render as zero on the
-  // globe. Fix: show an event if its lifecycle overlaps the cursor —
-  // startTime <= cursor, AND the last update was within the fetch window
-  // (30 days) so we don't keep drawing events EONET itself has stopped
-  // tracking.
+  // Point-event layers (quakes, EONET) share the same 24-hour window
+  // ending at the cursor. For events, this means only items whose MOST
+  // RECENT geometry update was in the last 24 h — a cyclone that hasn't
+  // moved in 22 days stays hidden even though EONET still lists it.
+  // This is tighter than the fetch's 30-day horizon on purpose: what
+  // users want to see is "what's happening now," not "what has ever
+  // existed in the last month."
   const filteredData = useMemo(() => {
     const cutoff = nowCursor;
-    const quakeWindow = 24 * 3600 * 1000;
-    const eventWindow = 30 * 24 * 3600 * 1000;
+    const WINDOW = 24 * 3600 * 1000;
     return {
       ...data,
       quakes: (data.quakes || []).filter(q =>
-        q.time <= cutoff && q.time >= cutoff - quakeWindow && (q.mag || 0) >= seismicMin
+        q.time <= cutoff && q.time >= cutoff - WINDOW && (q.mag || 0) >= seismicMin
       ),
-      events: (data.events || []).filter(e => {
-        const start = e.startTime || e.time;
-        return start <= cutoff && e.time >= cutoff - eventWindow;
-      }),
+      events: (data.events || []).filter(e =>
+        e.time <= cutoff && e.time >= cutoff - WINDOW
+      ),
     };
   }, [data, nowCursor, seismicMin]);
 
@@ -1297,12 +1286,12 @@ function App() {
             <ThemeToggle theme={theme} onChange={setTheme}/>
           </div>
           <div className="min-w-0 max-w-full overflow-hidden hidden sm:block">
-            <StatBar data={data} kp={kp}/>
+            <StatBar data={filteredData} kp={kp}/>
           </div>
         </div>
         {/* Phone-only stat pill on its own row */}
         <div className="sm:hidden pointer-events-auto order-2 min-w-0 max-w-full overflow-hidden">
-          <StatBar data={data} kp={kp}/>
+          <StatBar data={filteredData} kp={kp}/>
         </div>
         {/* Desktop action cluster (hidden on mobile — duplicated above) */}
         <div className="hidden sm:flex items-center gap-2 pointer-events-auto order-3">
