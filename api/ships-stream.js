@@ -10,6 +10,7 @@
 //   It auto-reconnects, works through HTTP proxies, and never exposes the key.
 
 import WebSocket from 'ws';
+import { shipDb, shipDbReady, ensureShipSchema, SHIP_RETENTION_DAYS } from './_ship-db.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -27,6 +28,17 @@ let reconnectTimer = null;
 let reconnectDelay = 15000;
 const RECONNECT_CAP = 5 * 60 * 1000;
 let pruneTimer = null;
+let dbFlushTimer = null;
+// Per-MMSI throttle for DB writes: epoch-ms of last recorded sample.
+// Independent of the in-memory SHIPS.track buffer (which keeps 10 points
+// for UI trails) so the DB gets a steady sampled history rather than
+// every AIS tick.
+const lastDbSample = new Map();
+// Sample rate: one position per MMSI per 30 min. With ~50k active MMSIs
+// per day this is ~100k writes/day = well under Neon free tier limits.
+const DB_SAMPLE_INTERVAL_MS = 30 * 60 * 1000;
+const DB_FLUSH_INTERVAL_MS  = 5 * 60 * 1000;
+const DB_PRUNE_INTERVAL_MS  = 6 * 60 * 60 * 1000;
 
 function shipCategory(code) {
   const c = Number(code) || 0;
@@ -52,6 +64,83 @@ function startPruner() {
     }
   }, 60 * 1000);
   pruneTimer.unref?.();
+}
+
+// Batch-flush the current SHIPS snapshot into Neon Postgres. Runs every
+// 5 min when Neon is configured (DATABASE_URL env var set). Sampling is
+// per-MMSI: one DB row per vessel per 30 min so the table grows at a
+// manageable rate (~100k rows/day globally, well within Neon free tier).
+//
+// Silently no-ops when no DB is configured — client's IndexedDB
+// accumulator continues to work locally either way.
+async function flushToDb() {
+  if (!shipDbReady) return;
+  const now = Date.now();
+  // Collect rows to insert in one batch. Each row is a sparse snapshot
+  // that lets us rebuild a per-MMSI trail 30 days back.
+  const rows = [];
+  for (const [mmsi, s] of SHIPS) {
+    if (typeof s.lat !== 'number' || typeof s.lon !== 'number') continue;
+    const prev = lastDbSample.get(mmsi) || 0;
+    if (now - prev < DB_SAMPLE_INTERVAL_MS) continue;
+    lastDbSample.set(mmsi, now);
+    rows.push({
+      mmsi, t: Math.floor(now / 1000),
+      lat: +s.lat.toFixed(4), lon: +s.lon.toFixed(4),
+      sog: typeof s.sog === 'number' ? Math.round(s.sog * 10) : null,
+      cog: typeof s.cog === 'number' ? Math.round(s.cog)      : null,
+    });
+  }
+  if (!rows.length) return;
+  try {
+    await ensureShipSchema();
+    // @neondatabase/serverless supports tagged-template parametrisation
+    // but batching inserts is cleanest via a single multi-row VALUES
+    // statement. UNNEST arrays is the Postgres idiom for many rows at
+    // once — one round-trip regardless of row count.
+    const mmsis = rows.map(r => r.mmsi);
+    const ts    = rows.map(r => r.t);
+    const lats  = rows.map(r => r.lat);
+    const lons  = rows.map(r => r.lon);
+    const sogs  = rows.map(r => r.sog);
+    const cogs  = rows.map(r => r.cog);
+    await shipDb`
+      INSERT INTO ship_positions (mmsi, t, lat, lon, sog, cog)
+      SELECT * FROM UNNEST(
+        ${mmsis}::int[], ${ts}::int[], ${lats}::real[], ${lons}::real[],
+        ${sogs}::smallint[], ${cogs}::smallint[]
+      )
+      ON CONFLICT (mmsi, t) DO NOTHING
+    `;
+    console.log(`[ships-proxy] flushed ${rows.length} positions to Neon`);
+  } catch (e) {
+    console.warn('[ships-proxy] db flush failed:', e.message);
+  }
+}
+
+async function pruneDb() {
+  if (!shipDbReady) return;
+  const cutoffSec = Math.floor((Date.now() - SHIP_RETENTION_DAYS * 24 * 3600 * 1000) / 1000);
+  try {
+    await ensureShipSchema();
+    const res = await shipDb`DELETE FROM ship_positions WHERE t < ${cutoffSec}`;
+    const n = res?.rowCount ?? 0;
+    if (n > 0) console.log(`[ships-proxy] pruned ${n} old DB rows`);
+  } catch (e) {
+    console.warn('[ships-proxy] db prune failed:', e.message);
+  }
+}
+
+function startDbFlush() {
+  if (!shipDbReady || dbFlushTimer) return;
+  // Kick one flush shortly after startup so fresh instances don't wait a
+  // full cycle to populate the first batch.
+  setTimeout(() => { flushToDb().catch(() => {}); }, 30 * 1000);
+  dbFlushTimer = setInterval(() => { flushToDb().catch(() => {}); }, DB_FLUSH_INTERVAL_MS);
+  dbFlushTimer.unref?.();
+  // Pruning is cheap but doesn't need to run often.
+  const pruneT = setInterval(() => { pruneDb().catch(() => {}); }, DB_PRUNE_INTERVAL_MS);
+  pruneT.unref?.();
 }
 
 function connectUpstream() {
@@ -136,6 +225,7 @@ function connectUpstream() {
 export default function handler(req, res) {
   connectUpstream();
   startPruner();
+  startDbFlush();
 
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

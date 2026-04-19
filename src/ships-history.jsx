@@ -239,6 +239,42 @@
     console.warn('[ships-history] hydrate failed — disabled', e);
   });
 
-  window.getShipHistory      = getHistory;
+  // Server-backed history (if Neon is provisioned) — a union of the
+  // server's 30-day accumulated samples and this client's own IndexedDB
+  // history. Server gives cross-device / first-visit coverage; IndexedDB
+  // fills in the fine-grained recent picks between server-side samples.
+  async function getHistoryMerged(mmsi) {
+    if (!mmsi) return null;
+    const localPromise = getHistory(mmsi);
+    let server = null;
+    try {
+      const r = await fetch(`/api/ship-history?mmsi=${encodeURIComponent(mmsi)}`, { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (Array.isArray(j?.positions)) server = j;
+      }
+      // 503 + auth_required is expected when Neon isn't provisioned; we
+      // quietly fall back to IndexedDB-only history.
+    } catch {}
+    const local = await localPromise;
+    if (!server || !server.positions.length) return local;
+    if (!local || !local.positions.length) return server;
+    // Merge + dedupe by timestamp (ms). Server samples are sparser (every
+    // 30 min) but go back further; local fills in between recent gaps.
+    const byT = new Map();
+    for (const p of server.positions) byT.set(p.t, p);
+    for (const p of local.positions)  byT.set(p.t, p);
+    const positions = Array.from(byT.values()).sort((a, b) => a.t - b.t);
+    return {
+      mmsi, positions,
+      firstSeen: positions[0].t,
+      lastSeen:  positions[positions.length - 1].t,
+      count:     positions.length,
+      source:    'merged',
+      meta:      local.meta,
+    };
+  }
+
+  window.getShipHistory      = getHistoryMerged;
   window.getShipHistoryStats = getStats;
 })();
