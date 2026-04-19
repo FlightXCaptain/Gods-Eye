@@ -88,12 +88,19 @@ function pushWindy(out, webcams) {
     const lon = w.location?.longitude;
     if (typeof lat !== 'number' || typeof lon !== 'number') continue;
     const webcamId = w.webcamId;
-    // Windy's public embed player. The correct URL shape — discovered via
-    // the 400 error body — is query-param form: ?webcamId=…&playerType=….
-    // playerType must be one of [live, day, month, year, lifetime]. We use
-    // "live" so cams with a live stream play through; cams without one fall
-    // back gracefully to the most recent frame inside Windy's own player.
-    const embedUrl = `https://webcams.windy.com/webcams/public/embed/player?webcamId=${webcamId}&playerType=live`;
+    // Windy's public embed player.
+    //
+    // IMPORTANT: `playerType=live` looks right but its "play" button is an
+    // <a target="_blank" href=".../stream/{id}"> — clicking it opens the
+    // original IP camera source in a new tab, which is not what anyone
+    // embedding wants. `playerType=day` plays a 25-frame 24-hour timelapse
+    // INLINE in the iframe (auto-compiled from recent captures) with no
+    // redirect. That's the only Windy player mode that keeps the viewer
+    // in-app. autoPlay/loop/interactive are honoured via URL params — the
+    // player renders them into its WindyPlayer config object.
+    const embedUrl = `https://webcams.windy.com/webcams/public/embed/player`
+      + `?webcamId=${webcamId}&playerType=day`
+      + `&autoPlay=true&loop=true&interactive=true&forceFullScreenOnOverlayPlay=false`;
     out.push({
       id: 'windy-' + webcamId,
       title: w.title || 'Webcam',
