@@ -1239,14 +1239,15 @@ function Globe({
       // cities; on mobile a 60-120 Hz touchmove stream used to redraw all
       // of that on every frame, making drag/pinch feel janky.
       //
-      // Two regimes:
-      //   • User interacting (drag / pinch / zoom): cap ~45 fps (22 ms).
-      //     Any coarser is perceptible as stutter during manual input.
-      //   • Idle auto-rotate: cap ~15 fps (66 ms). The globe drifts at
-      //     4°/s — that's 0.26° between redraws at 15 fps, well below
-      //     the threshold of visible stepping. Stacks with the basemap
-      //     LOD (110m during auto-rotate) so idle cost is minimal.
-      const BASE_REDRAW_MIN_MS = autoRotate && !focusTarget ? 66 : 22;
+      // Uniform ~45 fps (22 ms) throttle. An earlier attempt to drop
+      // auto-rotate to 15 fps caused a visible flicker: basemap
+      // coastlines would snap forward in discrete 0.26° steps while the
+      // overlay (ships / flights / particles) continued advancing at
+      // 60 fps — the rotational mismatch between layers reads as a
+      // strobe. With the basemap LOD (110m during motion) the uniform
+      // 22 ms cadence is already cheap enough and keeps everything in
+      // frame-accurate sync.
+      const BASE_REDRAW_MIN_MS = 22;
       if (dirtyBase.current && (tickNow - lastBaseRedrawMsRef.current) >= BASE_REDRAW_MIN_MS) {
         lastBaseRedrawMsRef.current = tickNow;
         bctx.clearRect(0,0,width,height);
