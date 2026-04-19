@@ -1487,6 +1487,40 @@ function Globe({
         }
       }
 
+      // Lightning strikes — quick bright flashes that fade over ~3 s.
+      // Rendered on the overlay (which redraws every frame) so the fade
+      // animation reads correctly. No hit regions — strikes are too
+      // short-lived to click usefully.
+      if (layers.lightning && typeof window.getLightningStrikes === 'function') {
+        const strikes = window.getLightningStrikes();
+        const now = Date.now();
+        const TTL = 3000;
+        for (let i = 0; i < strikes.length; i++) {
+          const s = strikes[i];
+          const age = (now - s.t) / TTL;
+          if (age < 0 || age >= 1) continue;
+          if (!visibleOn(projection, s.lon, s.lat)) continue;
+          const pt = projection([s.lon, s.lat]);
+          if (!pt) continue;
+          const alpha = Math.max(0, 1 - age);
+          // Core flash
+          octx.fillStyle = `rgba(254, 240, 138, ${(alpha * 0.95).toFixed(3)})`;
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], 1.5, 0, Math.PI * 2);
+          octx.fill();
+          // Halo (expands + fades slightly faster than core)
+          const haloR = 3 + age * 9;
+          const haloAlpha = Math.max(0, (1 - age) * 0.55);
+          const g = octx.createRadialGradient(pt[0], pt[1], 0, pt[0], pt[1], haloR);
+          g.addColorStop(0, `rgba(254, 240, 138, ${haloAlpha.toFixed(3)})`);
+          g.addColorStop(1, 'rgba(254, 240, 138, 0)');
+          octx.fillStyle = g;
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], haloR, 0, Math.PI * 2);
+          octx.fill();
+        }
+      }
+
       // NASA FIRMS thermal hotspots — individual fire pixels. LOD-decimated
       // because 15-40k points would dogpile at low zoom; spatial binning
       // collapses dense clusters to a single hot dot while preserving the
