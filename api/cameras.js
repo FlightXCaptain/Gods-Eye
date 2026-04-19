@@ -155,23 +155,14 @@ function mapNPS(w) {
   const lat = parseFloat(w.latitude);
   const lon = parseFloat(w.longitude);
   if (!isFinite(lat) || !isFinite(lon)) return null;
-  // NPS exposes images + a streamingUrl. Prefer HLS streams; otherwise use
-  // the static image as a refreshing still; fall back to link-only.
-  // All URLs go through sanitizeNpsUrl() to strip the double-prefix and
-  // handle relative paths — see function comment above.
+  // Video-only policy: drop any NPS cam that doesn't expose an HLS stream.
+  // The NPS catalogue is mostly refreshing-JPEG cams, which users now expect
+  // to play as video and which feel broken when they don't.
   const streamUrl = sanitizeNpsUrl(w.streamingUrl || w.streamUrl);
+  if (!streamUrl || !/\.m3u8(\?|$)/i.test(streamUrl)) return null;
   const imgUrl = sanitizeNpsUrl(Array.isArray(w.images) && w.images[0]?.url);
   const pageUrl = sanitizeNpsUrl(w.url)
     || `https://www.nps.gov/search?query=${encodeURIComponent(w.title || 'webcam')}`;
-
-  let embed;
-  if (streamUrl && /\.m3u8(\?|$)/i.test(streamUrl)) {
-    embed = { type: 'hls', url: streamUrl, posterUrl: imgUrl };
-  } else if (imgUrl) {
-    embed = { type: 'image-refresh', url: imgUrl, refreshSec: 60 };
-  } else {
-    embed = { type: 'link-only' };
-  }
   return {
     id: 'nps-' + (w.id || Math.random().toString(36).slice(2, 10)),
     title: w.title || 'NPS webcam',
@@ -180,100 +171,23 @@ function mapNPS(w) {
     source: 'nps',
     thumbnailUrl: imgUrl,
     pageUrl,
-    embed,
+    embed: { type: 'hls', url: streamUrl, posterUrl: imgUrl },
   };
 }
 
-// ---------- USGS volcano ----------------------------------------------------
-//
-// Curated from HVO (Hawaii), CVO (Cascades), AVO (Alaska), YVO (Yellowstone).
-// All are refreshing JPEG stills updated every 1–5 min; the image-refresh
-// embed reloads every 60 s with a cache-buster so the dossier modal feels
-// live. Image URLs sometimes rotate as the USGS updates their infra — if one
-// 404s the marker still renders, just without a preview.
-
-const USGS_CAMS = [
-  // Hawai'i (HVO)
-  { id:'kilauea-summit',    title:'Kīlauea Summit (KWcam)',         lat:19.406, lon:-155.281, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/HVO_cams/KWcam/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/kilauea/webcams' },
-  { id:'kilauea-halema',    title:'Kīlauea Halemaʻumaʻu (V1cam)',   lat:19.406, lon:-155.281, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/HVO_cams/V1cam/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/kilauea/webcams' },
-  { id:'kilauea-east-rift', title:'Kīlauea East Rift (PEcam)',      lat:19.351, lon:-155.105, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/HVO_cams/PEcam/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/kilauea/webcams' },
-  { id:'mauna-loa-ne',      title:'Mauna Loa NE Rift (M1cam)',      lat:19.470, lon:-155.580, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/HVO_cams/M1cam/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mauna-loa/webcams' },
-  { id:'mauna-loa-sw',      title:'Mauna Loa SW Rift (M2cam)',      lat:19.430, lon:-155.680, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/HVO_cams/M2cam/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mauna-loa/webcams' },
-  // Cascades (CVO)
-  { id:'st-helens-sep',     title:'Mount St. Helens (MSH_SEP)',     lat:46.200, lon:-122.186, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/MSH_SEP/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-st-helens/webcams' },
-  { id:'st-helens-lvu',     title:'Mount St. Helens (MSH_LVU)',     lat:46.241, lon:-122.218, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/MSH_LVU/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-st-helens/webcams' },
-  { id:'rainier-tahoma',    title:'Mount Rainier (PR_PTR)',         lat:46.852, lon:-121.760, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/PR_PTR/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-rainier/webcams' },
-  { id:'rainier-sunrise',   title:'Mount Rainier Sunrise (RR_EST)', lat:46.914, lon:-121.642, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/RR_EST/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-rainier/webcams' },
-  { id:'hood-timberline',   title:'Mount Hood Timberline (MH_TIM)', lat:45.374, lon:-121.695, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/MH_TIM/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-hood/webcams' },
-  { id:'hood-hoodriver',    title:'Mount Hood Hood River (MH_HRV)', lat:45.520, lon:-121.521, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/MH_HRV/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-hood/webcams' },
-  { id:'shasta-black',      title:'Mount Shasta (SH_BLK)',          lat:41.409, lon:-122.194, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/SH_BLK/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-shasta/webcams' },
-  { id:'newberry',          title:'Newberry Volcano (NB_PH)',       lat:43.722, lon:-121.230, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/NB_PH/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/newberry/webcams' },
-  { id:'lassen',            title:'Lassen Peak (LA_BRK)',           lat:40.488, lon:-121.505, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/LA_BRK/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/lassen-volcanic-center/webcams' },
-  { id:'three-sisters',     title:'Three Sisters (TS_BCH)',         lat:44.103, lon:-121.770, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/TS_BCH/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/three-sisters/webcams' },
-  { id:'glacier-peak',      title:'Glacier Peak (GP_GRN)',          lat:48.111, lon:-121.114, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/GP_GRN/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/glacier-peak/webcams' },
-  { id:'baker',             title:'Mount Baker (BK_LKE)',           lat:48.777, lon:-121.814, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/CVO_cams/BK_LKE/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-baker/webcams' },
-  // Alaska (AVO)
-  { id:'redoubt',           title:'Redoubt Volcano (RDDR)',         lat:60.485, lon:-152.743, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/RDDR/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/redoubt/webcams' },
-  { id:'augustine',         title:'Augustine Volcano (AUH)',        lat:59.363, lon:-153.435, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/AUH/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/augustine/webcams' },
-  { id:'spurr',             title:'Mount Spurr (CKL)',              lat:61.299, lon:-152.251, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/CKL/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-spurr/webcams' },
-  { id:'pavlof',            title:'Pavlof Volcano (PS1A)',          lat:55.417, lon:-161.887, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/PS1A/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/pavlof/webcams' },
-  { id:'cleveland',         title:'Mount Cleveland (CLCO)',         lat:52.822, lon:-169.944, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/CLCO/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-cleveland/webcams' },
-  { id:'shishaldin',        title:'Shishaldin Volcano (SSLW)',      lat:54.756, lon:-163.970, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/SSLW/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/shishaldin/webcams' },
-  { id:'veniaminof',        title:'Mount Veniaminof (VNWF)',        lat:56.197, lon:-159.389, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/VNWF/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/mount-veniaminof/webcams' },
-  { id:'great-sitkin',      title:'Great Sitkin (GSCK)',            lat:52.076, lon:-176.130, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/GSCK/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/great-sitkin/webcams' },
-  { id:'semisopochnoi',     title:'Semisopochnoi (CERB)',           lat:51.929, lon:179.580, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/AVO_cams/CERB/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/semisopochnoi/webcams' },
-  // Yellowstone (YVO)
-  { id:'yellowstone-mud',   title:'Yellowstone Mud Volcano',        lat:44.625, lon:-110.434, img:'https://volcanoes.usgs.gov/vsc/images/image_manager/YVO_cams/YMV/LATEST/main.jpg', page:'https://www.usgs.gov/volcanoes/yellowstone/webcams' },
-];
-
-function seedUSGS() {
-  return USGS_CAMS.map(c => ({
-    id: 'usgs-' + c.id,
-    title: c.title,
-    lat: c.lat, lon: c.lon,
-    category: 'volcano',
-    source: 'usgs',
-    thumbnailUrl: c.img,
-    pageUrl: c.page,
-    embed: { type: 'image-refresh', url: c.img, refreshSec: 60 },
-  }));
-}
-
-// ---------- NOAA (partial) --------------------------------------------------
-//
-// NOAA has no unified cam API. There are three publicly-documented, stable
-// sources we curate here: GML atmospheric observatory cams (Mauna Loa,
-// Barrow, Samoa, South Pole) and the NOAA/ESRL Boulder rooftop cam. Other
-// NOAA camera systems (buoy cams, ship cams) aren't reliably public, so we
-// skip them rather than ship dead markers.
-
-const NOAA_CAMS = [
-  { id:'mlo',    title:'Mauna Loa Observatory',           lat:19.536, lon:-155.576, category:'park', img:'https://gml.noaa.gov/webdata/mlo/camera/mlo.jpg',    page:'https://gml.noaa.gov/obop/mlo/livecamera.html' },
-  { id:'brw',    title:'Barrow / Utqiaġvik Observatory',  lat:71.323, lon:-156.611, category:'park', img:'https://gml.noaa.gov/webdata/brw/camera/brw.jpg',    page:'https://gml.noaa.gov/obop/brw/livecamera.html' },
-  { id:'smo',    title:'American Samoa Observatory',      lat:-14.247, lon:-170.564, category:'park', img:'https://gml.noaa.gov/webdata/smo/camera/smo.jpg',    page:'https://gml.noaa.gov/obop/smo/livecamera.html' },
-  { id:'spo',    title:'South Pole Observatory',          lat:-89.997, lon:-24.802, category:'park', img:'https://gml.noaa.gov/webdata/spo/camera/spo.jpg',    page:'https://gml.noaa.gov/obop/spo/livecamera.html' },
-  { id:'boulder',title:'NOAA Boulder — Flatirons',        lat:39.992, lon:-105.260, category:'city', img:'https://csd.noaa.gov/webcams/boulder/current.jpg',   page:'https://csd.noaa.gov/webcams/' },
-];
-
-function seedNOAA() {
-  return NOAA_CAMS.map(c => ({
-    id: 'noaa-' + c.id,
-    title: c.title,
-    lat: c.lat, lon: c.lon,
-    category: c.category,
-    source: 'noaa',
-    thumbnailUrl: c.img,
-    pageUrl: c.page,
-    embed: { type: 'image-refresh', url: c.img, refreshSec: 120 },
-  }));
-}
-
 // ---------- Assembly --------------------------------------------------------
+//
+// Video-only: USGS volcano cams, NOAA observatory cams, and NPS image-only
+// cams all used to live here. They were dropped because the user experience
+// of "click marker → see static JPEG" wasn't what "live camera" promises.
+// Only sources that play actual video remain:
+//   - Windy:  iframe player (always works — handles live streams AND graceful
+//             fallback to timelapses for non-live cams)
+//   - NPS:    only cams with HLS m3u8 streams; everything else filtered out
+//             in mapNPS.
 
 async function buildList() {
   const cams = [];
-  cams.push(...seedUSGS());
-  cams.push(...seedNOAA());
 
   const windyKey = process.env.WINDY_WEBCAMS_KEY;
   const npsKey   = process.env.NPS_API_KEY;
