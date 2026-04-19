@@ -276,7 +276,7 @@ function classifyLOD(points, cellPx = 36) {
 function Globe({
   width, height, data, nowCursor, onPickMarker, onFocusItem, focusTarget,
   theme, animationIntensity = 0.7, layers, autoRotate = true,
-  onInteract, zoomOutSignal = 0,
+  onInteract, onUserPan, zoomOutSignal = 0,
 }) {
   const wrapRef = useRef(null);
   const baseRef = useRef(null);   // land (cached, redraws on rotation)
@@ -357,6 +357,11 @@ function Globe({
   // src/cameras.jsx). Small array (~25–500 entries), replaced wholesale on
   // each refresh; stored in a ref so updates don't trigger re-renders.
   const camerasRef = useRef([]);
+  // Live position of the currently-tracked object — written every frame by
+  // the tracking block in the tick loop, read by the reticle renderer so
+  // the ring follows a moving target instead of sitting at the dblclick
+  // position forever. null when nothing is being tracked.
+  const focusLiveCoordsRef = useRef(null);
   useEffect(() => {
     if (typeof window.subscribeCameras !== 'function') return;
     return window.subscribeCameras((list) => { camerasRef.current = list || []; });
@@ -500,6 +505,10 @@ function Globe({
       .on('start', (ev) => {
         dragging = true;
         markInteraction();
+        // Any pan stops focus/tracking — the user has taken control of the
+        // camera and doesn't want the tick loop snapping back to a moving
+        // target.
+        onUserPan?.();
         lastMove = performance.now();
         lastMx = ev.x; lastMy = ev.y;
         vx = 0; vy = 0;
@@ -680,7 +689,7 @@ function Globe({
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
     };
-  }, [width, height, projection, onPickMarker, onFocusItem]);
+  }, [width, height, projection, onPickMarker, onFocusItem, onUserPan]);
 
   const hitRegionsRef = useRef([]);
   // City hit regions are rebuilt with the base canvas (only redraws on
@@ -845,7 +854,9 @@ function Globe({
       // them. Each frame we re-resolve the tracked item's current position
       // from the data stream (flights/ships update every 15–30 s, ISS every
       // second) and update the target rotation so the easing interpolator
-      // keeps the globe centred on the object as it moves.
+      // keeps the globe centred on the object as it moves. The live
+      // position is also stashed in a ref so the reticle render code can
+      // draw at the moving position instead of the stale dblclick coords.
       if (focusTarget?.trackId && data) {
         let live = null;
         switch (focusTarget.trackLayer) {
@@ -856,7 +867,10 @@ function Globe({
         }
         if (live && typeof live.lat === 'number' && typeof live.lon === 'number') {
           targetRotRef.current = [-live.lon, -live.lat, 0];
+          focusLiveCoordsRef.current = [live.lon, live.lat];
         }
+      } else {
+        focusLiveCoordsRef.current = null;
       }
 
       // Smooth toward target (lerp)
@@ -1541,9 +1555,12 @@ function Globe({
         }
       }
 
-      // Focus reticle
-      if (focusTarget?.coords && visibleOn(projection, focusTarget.coords[0], focusTarget.coords[1])) {
-        const pt = projection(focusTarget.coords);
+      // Focus reticle — prefer the live-tracked position (updated each
+      // frame for flights/ships/ISS) and fall back to the stored dblclick
+      // coords for stationary targets like cameras and cities.
+      const reticleCoords = focusLiveCoordsRef.current || focusTarget?.coords;
+      if (reticleCoords && visibleOn(projection, reticleCoords[0], reticleCoords[1])) {
+        const pt = projection(reticleCoords);
         if (pt) {
           const r = 34;
           octx.strokeStyle = '#f43f5e'; octx.lineWidth = 1.2;
