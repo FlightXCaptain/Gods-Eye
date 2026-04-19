@@ -484,6 +484,7 @@ function Dossier({ item, onClose }) {
               Source · ADSBx {item.source === 'adsbx-ocean' ? '(ocean)' : ''}
             </div>
           )}
+          <FlightRouteInfo icao24={item.id}/>
         </>}
         {layer === 'ship' && <>
           <div className="text-lg">{item.name || `MMSI ${item.mmsi}`}</div>
@@ -554,6 +555,42 @@ function KV({ k, v }) {
     <div className="flex items-baseline gap-3">
       <span className="text-[10px] uppercase font-mono opacity-50 tracking-wider w-16 shrink-0">{k}</span>
       <span className="text-sm font-mono">{v}</span>
+    </div>
+  );
+}
+
+// Async-fetches the most recent OpenSky-logged flight for an aircraft and
+// renders the departure / arrival airports. Returns null while loading or
+// when no flight record exists (aircraft new to the network, private
+// operation, or route hasn't been logged). See api/flight-route.js for
+// the server side, which resolves ICAO airport codes to coordinates via
+// OurAirports.
+function FlightRouteInfo({ icao24 }) {
+  const [route, setRoute] = useState(null);
+  useEffect(() => {
+    if (!icao24 || typeof window.getFlightRoute !== 'function') return;
+    let cancel = false;
+    window.getFlightRoute(icao24).then((r) => { if (!cancel) setRoute(r); }).catch(() => {});
+    return () => { cancel = true; };
+  }, [icao24]);
+  if (!route || !route.dep || !route.arr) return null;
+  const depLabel = `${route.dep.iata || route.dep.icao} · ${route.dep.name}`;
+  const arrLabel = `${route.arr.iata || route.arr.icao} · ${route.arr.name}`;
+  // Great-circle distance between the two airports. Used for a rough
+  // route-length readout — the actual flight path deviates slightly due
+  // to wind routing / airways, but this is the right order of magnitude.
+  const toRad = (d) => d * Math.PI / 180;
+  const lat1 = toRad(route.dep.lat), lat2 = toRad(route.arr.lat);
+  const dLat = lat2 - lat1;
+  const dLon = toRad(route.arr.lon - route.dep.lon);
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  const km = Math.round(2 * 6371 * Math.asin(Math.sqrt(a)));
+  return (
+    <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1">
+      <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Route · OpenSky</div>
+      <KV k="From" v={depLabel}/>
+      <KV k="To" v={arrLabel}/>
+      <KV k="Distance" v={`~${km.toLocaleString()} km`}/>
     </div>
   );
 }
