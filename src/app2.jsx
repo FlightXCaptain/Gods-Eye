@@ -596,11 +596,16 @@ function Dossier({ item, onClose }) {
           {item.category && (
             <div className="text-sm opacity-70 capitalize">{item.category}{item.source ? ` · ${item.source}` : ''}</div>
           )}
-          {/* Thumbnail if provider exposes one. Sized to fit the 320-wide
-              dossier comfortably; hide on load failure so broken hosts don't
-              show a stock browser placeholder. */}
+          {/* Thumbnail — click-to-play. Whole thumbnail is the hit target so
+              it reads as "press play on this preview." Hide on load failure
+              so broken hosts don't show a stock browser placeholder. */}
           {item.thumbnailUrl && (
-            <div className="-mx-1 rounded-xl overflow-hidden border border-black/10 dark:border-white/10">
+            <button
+              type="button"
+              onClick={() => { if (typeof window.openCameraPlayer === 'function') window.openCameraPlayer(item); }}
+              className="-mx-1 block w-full rounded-xl overflow-hidden border border-black/10 dark:border-white/10 relative group cursor-pointer"
+              title="Open live player"
+            >
               <img
                 src={item.thumbnailUrl}
                 alt={item.title}
@@ -609,14 +614,35 @@ function Dossier({ item, onClose }) {
                 referrerPolicy="no-referrer"
                 onError={(e) => { e.currentTarget.parentElement.style.display = 'none'; }}
               />
-            </div>
+              {/* Play-button overlay */}
+              <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition">
+                <span className="w-10 h-10 rounded-full bg-accent-500/85 flex items-center justify-center shadow-lg opacity-80 group-hover:opacity-100 transition">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M8 5l12 7-12 7z"/></svg>
+                </span>
+              </span>
+            </button>
           )}
           <KV k="Position" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
-          {item.pageUrl && (
-            <a href={item.pageUrl} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">
-              Watch live →
-            </a>
-          )}
+          {/* Primary action: open the embed player modal. Falls through to
+              a link for link-only cams. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {item.embed && item.embed.type !== 'link-only' ? (
+              <button
+                type="button"
+                onClick={() => { if (typeof window.openCameraPlayer === 'function') window.openCameraPlayer(item); }}
+                className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500 text-white hover:bg-accent-600 transition inline-flex items-center gap-1.5"
+              >
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M8 5l12 7-12 7z"/></svg>
+                Watch live
+              </button>
+            ) : (
+              item.pageUrl && (
+                <a href={item.pageUrl} target="_blank" rel="noopener" className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition">
+                  Open source ↗
+                </a>
+              )
+            )}
+          </div>
         </>}
         {hasCoords && diveInMeta && (
           <div className="pt-1">
