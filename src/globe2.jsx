@@ -479,6 +479,10 @@ function Globe({
     // Velocity tracking for inertia
     let vx = 0, vy = 0, lastMove = 0, lastMx = 0, lastMy = 0;
     let dragging = false;
+    // Flipped true on two-finger touchstart, back to false ~30 ms after
+    // returning to <2 fingers. Suppresses d3-drag updates during a pinch
+    // so the two gestures don't fight each other.
+    let pinchActive = false;
 
     const drag = d3.drag()
       // Mouse events pass through unconditionally. For touch, only accept
@@ -505,6 +509,9 @@ function Globe({
         targetRotRef.current = [...rotRef.current];
       })
       .on('drag', (ev) => {
+        // Pinch is in progress — skip drag updates so both gestures don't
+        // mutate rotRef in the same frame.
+        if (pinchActive) return;
         markInteraction();
         const now = performance.now();
         const dt = Math.max(1, now - lastMove);
@@ -627,41 +634,112 @@ function Globe({
     el.addEventListener('mousemove', onMove);
     el.addEventListener('mouseleave', () => { hoverRef.current = null; });
 
-    // Touch pinch zoom — anchored at the midpoint between the two fingers so
-    // the zoom feels like it's happening where the user is pinching, not at
-    // the centre of the canvas.
+    // Touch handling — pinch zoom + double-tap focus + clean drag/pinch
+    // transition. Key decisions:
+    //   1. pinchActive flag short-circuits d3-drag updates (see drag.on('drag')
+    //      above) so a second finger doesn't let drag keep spinning the
+    //      globe while our pinch handler is trying to zoom.
+    //   2. The pinch anchor is FIXED at touchstart midpoint — recomputing
+    //      it per frame caused the zoom focal point to drift unpredictably
+    //      as fingers moved.
+    //   3. Simple double-tap detector for mobile since dblclick is flaky
+    //      on iOS with touch-action: none. Falls through to onFocusItem
+    //      when a marker is hit, same as desktop dblclick.
     let pinchLastDist = 0;
+    let pinchAnchor = null;          // {x, y} in canvas coords, fixed per gesture
+    let singleTouchStart = null;     // {x, y, t} — for tap-vs-drag detection
+    let lastTap = null;              // {x, y, t} — for double-tap detection
+    const DOUBLE_TAP_MS     = 350;
+    const DOUBLE_TAP_MAX_DRIFT = 30; // px between taps
+    const TAP_MAX_MOVE      = 10;    // px — larger than this is a drag
+
     const onTouchStart = (e) => {
       if (e.touches.length === 2) {
         markInteraction();
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        pinchActive = true;
+        const rect = el.getBoundingClientRect();
+        const t0 = e.touches[0], t1 = e.touches[1];
+        const dx = t0.clientX - t1.clientX;
+        const dy = t0.clientY - t1.clientY;
         pinchLastDist = Math.hypot(dx, dy);
+        pinchAnchor = {
+          x: (t0.clientX + t1.clientX) / 2 - rect.left,
+          y: (t0.clientY + t1.clientY) / 2 - rect.top,
+        };
+        singleTouchStart = null;
+        return;
+      }
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        singleTouchStart = { x: t.clientX, y: t.clientY, t: performance.now() };
       }
     };
+
     const onTouchMove = (e) => {
-      if (e.touches.length === 2) {
+      if (e.touches.length === 2 && pinchAnchor) {
         e.preventDefault();
         markInteraction();
-        const rect = el.getBoundingClientRect();
-        const x1 = e.touches[0].clientX, y1 = e.touches[0].clientY;
-        const x2 = e.touches[1].clientX, y2 = e.touches[1].clientY;
-        const dx = x1 - x2, dy = y1 - y2;
+        const t0 = e.touches[0], t1 = e.touches[1];
+        const dx = t0.clientX - t1.clientX;
+        const dy = t0.clientY - t1.clientY;
         const d = Math.hypot(dx, dy);
         if (pinchLastDist > 0) {
-          const midX = (x1 + x2) / 2 - rect.left;
-          const midY = (y1 + y2) / 2 - rect.top;
-          zoomToward(midX, midY, d / pinchLastDist);
+          zoomToward(pinchAnchor.x, pinchAnchor.y, d / pinchLastDist);
         }
         pinchLastDist = d;
       }
     };
-    // Reset the pinch baseline any time a finger leaves the screen — otherwise
-    // the next pinch starts with a stale `pinchLastDist` and the first move
-    // frame causes a big zoom jump.
+
     const onTouchEnd = (e) => {
-      if (e.touches.length < 2) pinchLastDist = 0;
+      // Returning to <2 fingers — pinch is over.
+      if (e.touches.length < 2) {
+        pinchLastDist = 0;
+        pinchAnchor = null;
+        // Small delay before re-enabling drag keeps a fast release from
+        // immediately registering the remaining finger's touchmove as a
+        // new drag gesture.
+        if (pinchActive) {
+          setTimeout(() => { pinchActive = false; }, 30);
+        }
+      }
+      // Double-tap detection — only valid when the user had exactly one
+      // finger down, barely moved, and released cleanly.
+      if (e.changedTouches.length === 1 && e.touches.length === 0
+          && singleTouchStart && !pinchActive) {
+        const t = e.changedTouches[0];
+        const moved = Math.hypot(t.clientX - singleTouchStart.x, t.clientY - singleTouchStart.y);
+        if (moved <= TAP_MAX_MOVE) {
+          const now = performance.now();
+          if (lastTap && (now - lastTap.t) < DOUBLE_TAP_MS
+              && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < DOUBLE_TAP_MAX_DRIFT) {
+            // It's a double-tap. Hit-test for marker focus; otherwise
+            // free-space zoom toward the tap point.
+            e.preventDefault();
+            const rect = el.getBoundingClientRect();
+            const mx = t.clientX - rect.left, my = t.clientY - rect.top;
+            markInteraction();
+            const hit = hitTest(mx, my);
+            if (hit && onFocusItem) {
+              onFocusItem(hit);
+            } else {
+              projection.rotate(rotRef.current).scale(scaleRef.current);
+              const inv = projection.invert([mx, my]);
+              if (inv) {
+                targetRotRef.current = [-inv[0], -inv[1], 0];
+                targetScaleRef.current = Math.min(scaleRef.current * 2.5, Math.min(width, height) * 50);
+              }
+            }
+            lastTap = null;
+          } else {
+            lastTap = { x: t.clientX, y: t.clientY, t: now };
+          }
+        } else {
+          lastTap = null;  // drag, not tap — reset double-tap state
+        }
+      }
+      singleTouchStart = null;
     };
+
     el.addEventListener('touchstart', onTouchStart, { passive: false });
     el.addEventListener('touchmove', onTouchMove, { passive: false });
     el.addEventListener('touchend', onTouchEnd);
@@ -833,10 +911,10 @@ function Globe({
         const nx = r[0] + AUTO_ROTATE_DEG_PER_SEC * frameDt;
         rotRef.current = [nx, r[1], 0];
         targetRotRef.current = [...rotRef.current];
-        if (tickNow - lastBaseRedrawMsRef.current > 33) {
-          dirtyBase.current = true;
-          lastBaseRedrawMsRef.current = tickNow;
-        }
+        // Throttling is now centralised at the base-redraw check below —
+        // setting the dirty flag unconditionally here lets the throttle
+        // decide when to actually render.
+        dirtyBase.current = true;
       }
 
       // Live-track moving objects when the user double-clicked to focus
@@ -881,8 +959,14 @@ function Globe({
 
       projection.rotate(rotRef.current).scale(scaleRef.current);
 
-      // Draw base (only when dirty) — uses current zoom for LOD decisions below.
-      if (dirtyBase.current) {
+      // Draw base (only when dirty AND enough time has passed) — the base
+      // layer re-projects country polygons, states, rivers, lakes, and
+      // cities; on mobile a 60-120 Hz touchmove stream used to redraw all
+      // of that on every frame, making drag/pinch feel janky. Cap to
+      // ~45 FPS (22 ms) — imperceptible drift, massive CPU savings.
+      const BASE_REDRAW_MIN_MS = 22;
+      if (dirtyBase.current && (tickNow - lastBaseRedrawMsRef.current) >= BASE_REDRAW_MIN_MS) {
+        lastBaseRedrawMsRef.current = tickNow;
         bctx.clearRect(0,0,width,height);
         const path = d3.geoPath(projection, bctx);
         const isDark = theme === 'dark';
