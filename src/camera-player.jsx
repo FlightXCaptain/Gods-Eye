@@ -112,16 +112,26 @@
   // ---- Embed renderers -----------------------------------------------
 
   function mountIframe(body, shim, embed) {
-    // Windy's public player iframe. `allowfullscreen` for their fullscreen
-    // toggle; `allow="autoplay"` lets their player start video without a
-    // click (many browsers gate autoplay so the player politely falls back
-    // to a still if it can't autoplay — that's fine).
+    // Windy's public player iframe.
+    //
+    // `sandbox` is the critical attribute here — without it, Windy's player
+    // hijacks the top-level window when the user clicks play (their page has
+    // an <a target="_top"> / window.top.location redirect to the full
+    // windy.com site). Sandbox with allow-scripts+allow-same-origin lets the
+    // player run normally while blocking any attempt to navigate the
+    // parent. We include allow-presentation for fullscreen and allow-popups
+    // so that intentional "open on windy.com" clicks open a new tab instead
+    // of silently failing.
     const iframe = document.createElement('iframe');
     iframe.src = embed.url;
     iframe.className = 'absolute inset-0 w-full h-full border-0';
     iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
     iframe.allowFullscreen = true;
     iframe.referrerPolicy = 'no-referrer-when-downgrade';
+    iframe.setAttribute(
+      'sandbox',
+      'allow-scripts allow-same-origin allow-presentation allow-forms allow-popups allow-popups-to-escape-sandbox'
+    );
     iframe.addEventListener('load', () => { if (shim?.parentNode) shim.parentNode.removeChild(shim); });
     body.appendChild(iframe);
     // Cleanup just removes the iframe — no listeners we own.
