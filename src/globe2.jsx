@@ -165,6 +165,56 @@ function solarPosition(date) {
   return [lon, lat];
 }
 
+// Advance an eased display position each frame. Supports two sources of
+// velocity: (a) DECLARED — the caller passes velLat/velLon in °/sec
+// (e.g. sats use TLE-propagated velocity; ships convert sog+cog), or
+// (b) INFERRED — null/undefined velocity triggers position-delta between
+// consecutive snapshots (used for ISS, which has a scalar speed but no
+// heading in the feed).
+//
+// st fields (created/maintained by caller, ° and ms):
+//   aLat, aLon, aT   anchor (last snapshot) position + time
+//   vLat, vLon       velocity (°/sec) — declared or inferred
+//   dLat, dLon       currently-displayed (eased) position
+//   lastKey          snapshot-change detection
+function advanceEased(st, newLat, newLon, tickNow, velLat, velLon, ease = 0.22) {
+  const key = newLat + ',' + newLon;
+  if (key !== st.lastKey) {
+    // Snapshot changed — re-anchor, and infer velocity if no declared.
+    if (velLat == null || velLon == null) {
+      const dt = Math.max(0.01, (tickNow - st.aT) / 1000);
+      let dlon = newLon - st.aLon;
+      if (dlon > 180) dlon -= 360; if (dlon < -180) dlon += 360;
+      const vLatNew = (newLat - st.aLat) / dt;
+      const vLonNew = dlon / dt;
+      // Reject velocity spikes from data-feed oddities (wraparound,
+      // transient bad rows). 20°/sec is far above any real orbital motion.
+      if (Math.abs(vLatNew) < 20 && Math.abs(vLonNew) < 20) {
+        st.vLat = vLatNew;
+        st.vLon = vLonNew;
+      }
+    }
+    st.aLat = newLat; st.aLon = newLon;
+    st.aT = tickNow;
+    st.lastKey = key;
+  }
+  // Declared velocity is applied every frame (caller's latest).
+  if (velLat != null && velLon != null) {
+    st.vLat = velLat;
+    st.vLon = velLon;
+  }
+  const dtSec = (tickNow - st.aT) / 1000;
+  let pLat = st.aLat + st.vLat * dtSec;
+  let pLon = st.aLon + st.vLon * dtSec;
+  if (pLon > 180) pLon -= 360;
+  if (pLon < -180) pLon += 360;
+  st.dLat += (pLat - st.dLat) * ease;
+  let dlo = pLon - st.dLon;
+  if (dlo > 180) dlo -= 360; if (dlo < -180) dlo += 360;
+  st.dLon += dlo * ease;
+  if (st.dLon > 180) st.dLon -= 360; if (st.dLon < -180) st.dLon += 360;
+}
+
 function iconEvent(ctx, cx, cy, size, color) {
   const s = size * 0.4;
   ctx.strokeStyle = color;
@@ -329,6 +379,18 @@ function Globe({
   //   displayLat/Lon/Hdg       — what we draw this frame
   //   lastTs                   — server's _ts, detects "new update arrived"
   const flightStateRef = useRef(new Map());
+  // Ship smoothing state — declared sog (knots) + cog (degrees) feed
+  // the eased display, same idea as flights. Keyed by mmsi.
+  const shipStateRef   = useRef(new Map());
+  // Satellite smoothing state. propagateSats now emits velLat/velLon in
+  // °/sec alongside the position, computed from a second propagation
+  // step at +1 s. advanceEased uses those declared values directly.
+  // Keyed by norad (or name fallback).
+  const satStateRef    = useRef(new Map());
+  // ISS is a singleton — no key needed. wheretheiss.at returns scalar
+  // velocity in km/h but no heading, so we infer both from position
+  // delta between successive polls.
+  const issStateRef    = useRef(null);
   // Base canvas redraw throttle. During idle auto-rotate we'd otherwise be
   // reparsing country / state / river / lake features 60×/sec; cap to ~30fps.
   const lastBaseRedrawMsRef = useRef(0);
@@ -1044,13 +1106,21 @@ function Globe({
           case 'ship':   live = data.ships?.find(s => s.mmsi === focusTarget.trackId); break;
           case 'sat':    live = data.sats?.find(s => (s.norad || s.name) === focusTarget.trackId); break;
         }
-        // For flights, prefer the eased display position (from dead-reckoning
-        // smoother) over the raw snapshot — otherwise the camera jitters
-        // every time a new ADS-B update arrives even though the icon moves
-        // smoothly.
-        if (focusTarget.trackLayer === 'flight' && live) {
-          const st = flightStateRef.current.get(focusTarget.trackId);
-          if (st) live = { ...live, lat: st.displayLat, lon: st.displayLon };
+        // Prefer the eased display position over the raw snapshot for ALL
+        // moving targets — otherwise the camera lurches every time a new
+        // snapshot arrives even though the icon visibly glides.
+        if (live) {
+          let st = null;
+          if      (focusTarget.trackLayer === 'flight') st = flightStateRef.current.get(focusTarget.trackId);
+          else if (focusTarget.trackLayer === 'ship')   st = shipStateRef.current.get(focusTarget.trackId);
+          else if (focusTarget.trackLayer === 'sat')    st = satStateRef.current.get(focusTarget.trackId);
+          else if (focusTarget.trackLayer === 'iss')    st = issStateRef.current;
+          if (st) {
+            // Flights store display in .displayLat/Lon; ships/sats/ISS in .dLat/Lon.
+            const eLat = st.displayLat != null ? st.displayLat : st.dLat;
+            const eLon = st.displayLon != null ? st.displayLon : st.dLon;
+            if (eLat != null && eLon != null) live = { ...live, lat: eLat, lon: eLon };
+          }
         }
         if (live && typeof live.lat === 'number' && typeof live.lon === 'number') {
           targetRotRef.current = [-live.lon, -live.lat, 0];
@@ -1762,15 +1832,48 @@ function Globe({
         const seenShip = new Set();
         const shipScale = zoom >= 2 ? 1.0 : zoom >= 1.2 ? 0.85 : 0.7;
         const rendered = [];
+        const sState = shipStateRef.current;
+        const seenShipIds = new Set();
         for (const s of data.ships) {
-          if (!visibleOn(projection, s.lon, s.lat)) continue;
-          const pt = projection([s.lon, s.lat]); if (!pt) continue;
+          if (!s.mmsi) continue;
+          seenShipIds.add(s.mmsi);
+          // Declared sog (knots) + cog (deg) → °/sec velocity vector.
+          // A ship at 20 kn = 37 km/h = 0.33°/h lat ≈ 9.3e-5 °/s.
+          const sog = typeof s.sog === 'number' ? s.sog : 0;
+          const cogRad = ((typeof s.cog === 'number' ? s.cog : 0)) * Math.PI / 180;
+          const kmPerSec = sog * 1.852 / 3600;
+          const latRad = s.lat * Math.PI / 180;
+          const velLat = (kmPerSec * Math.cos(cogRad)) / 111;
+          const velLon = (kmPerSec * Math.sin(cogRad)) / (111 * Math.max(0.1, Math.cos(latRad)));
+
+          let st = sState.get(s.mmsi);
+          if (!st) {
+            st = { aLat:s.lat, aLon:s.lon, aT:tickNow, vLat:velLat, vLon:velLon,
+                   dLat:s.lat, dLon:s.lon, dHdg: (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0),
+                   lastKey: s.lat + ',' + s.lon };
+            sState.set(s.mmsi, st);
+          }
+          advanceEased(st, s.lat, s.lon, tickNow, velLat, velLon, 0.20);
+          // Heading: reported `heading` preferred (if valid), else cog. Ease
+          // via shortest-angular-path so a 359°→1° turn goes the short way.
+          const targetHdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog != null ? s.cog : st.dHdg);
+          let dh = targetHdg - st.dHdg;
+          while (dh > 180) dh -= 360; while (dh < -180) dh += 360;
+          st.dHdg += dh * 0.12;
+
+          if (!visibleOn(projection, st.dLon, st.dLat)) continue;
+          const pt = projection([st.dLon, st.dLat]); if (!pt) continue;
           const [px, py] = pt;
           const k = (Math.floor(px / shipCell) << 16) | (Math.floor(py / shipCell) & 0xffff);
           if (seenShip.has(k)) continue;
           seenShip.add(k);
-          pushTrail(shipHistRef.current, s.mmsi, s.lon, s.lat);
-          rendered.push({ s, px, py });
+          // Trail uses eased position so the tail stays attached to the hull.
+          pushTrail(shipHistRef.current, s.mmsi, st.dLon, st.dLat);
+          rendered.push({ s, px, py, hdg: st.dHdg });
+        }
+        // Prune stale ship state.
+        for (const id of sState.keys()) {
+          if (!seenShipIds.has(id)) sState.delete(id);
         }
         // Trail colour matches the vessel category — the tail stays tonally
         // consistent with the hull icon, so the motion reads at a glance.
@@ -1786,9 +1889,8 @@ function Globe({
           const hist = (s.track && s.track.length >= 2) ? s.track : shipHistRef.current.get(s.mmsi);
           drawTrail(hist, base);
         }
-        for (const { s, px, py } of rendered) {
+        for (const { s, px, py, hdg } of rendered) {
           const col = shipColor[s.category] || shipColor.other;
-          const hdg = (s.heading != null && s.heading < 360) ? s.heading : (s.cog || 0);
           iconShip(octx, px, py, hdg, shipScale, col, shipStroke);
           pushHit(px, py, Math.max(5, shipCell * 0.45), 'ship', s);
         }
@@ -1799,13 +1901,32 @@ function Globe({
       // still render, just as regular sat icons like their lower-orbit kin.
       if (layers.sats && data.sats) {
         const otherSats = data.sats;
+        const satState = satStateRef.current;
+        const seenSatIds = new Set();
 
-        // Other sats (LEO/MEO): LOD — full sat icon when sparse, dot when dense.
+        // Smooth positions FIRST using propagator-derived velLat/velLon,
+        // then project. The propagator runs every 2 s globally; without
+        // smoothing the icons would teleport ~14 km between updates.
         const sPts = [];
         for (const s of otherSats) {
-          const pt = projectAtAltitude(projection, s.lon, s.lat, s.alt || 0);
+          const id = s.norad || s.name;
+          if (!id) continue;
+          seenSatIds.add(id);
+          let st = satState.get(id);
+          if (!st) {
+            st = { aLat:s.lat, aLon:s.lon, aT:tickNow, vLat: s.velLat || 0, vLon: s.velLon || 0,
+                   dLat:s.lat, dLon:s.lon, lastKey: s.lat + ',' + s.lon };
+            satState.set(id, st);
+          }
+          // Declared velocity from satellite.js — stable predictions.
+          advanceEased(st, s.lat, s.lon, tickNow, s.velLat, s.velLon, 0.28);
+          const pt = projectAtAltitude(projection, st.dLon, st.dLat, s.alt || 0);
           if (!pt) continue;
-          sPts.push({ px: pt[0], py: pt[1], s });
+          sPts.push({ px: pt[0], py: pt[1], s, dLon: st.dLon, dLat: st.dLat });
+        }
+        // Prune stale state.
+        for (const id of satState.keys()) {
+          if (!seenSatIds.has(id)) satState.delete(id);
         }
         const lod = classifyLOD(sPts, Math.max(14, 24/zoom));
         const satCol = isDark ? 'rgba(217,70,239,0.9)' : 'rgba(168,85,247,0.95)';
@@ -1814,10 +1935,12 @@ function Globe({
         // without trailing every dim dot. Altitude-aware so the polyline sits
         // at orbit height like the icon itself.
         for (let i = 0; i < sPts.length; i++) {
-          const { s } = sPts[i];
+          const { s, dLon, dLat } = sPts[i];
           if (lod[i].mode !== 'full') continue;
           const id = s.norad || s.name;
-          pushTrail(satHistRef.current, id, s.lon, s.lat);
+          // Trail uses eased position so the orbit arc stays attached
+          // to the moving icon instead of sampling the 2 s snapshots.
+          pushTrail(satHistRef.current, id, dLon, dLat);
           drawTrail(satHistRef.current.get(id), 'rgba(217,70,239,0)', s.alt || 0);
         }
         for (let i = 0; i < sPts.length; i++) {
@@ -1846,18 +1969,27 @@ function Globe({
         }
       }
 
-      // ISS — silhouette + pulse
+      // ISS — silhouette + pulse. The wheretheiss.at feed gives position
+      // at ~1 Hz with scalar velocity (km/h) but no heading, so we infer
+      // both from position delta via advanceEased (null declared vel).
       if (layers.iss && data.iss) {
-        // Push history whether or not the ISS is currently visible so the
-        // trail is ready the moment it rotates into view.
+        let st = issStateRef.current;
+        if (!st) {
+          st = { aLat:data.iss.lat, aLon:data.iss.lon, aT:tickNow,
+                 vLat:0, vLon:0, dLat:data.iss.lat, dLon:data.iss.lon,
+                 lastKey: data.iss.lat + ',' + data.iss.lon };
+          issStateRef.current = st;
+        }
+        advanceEased(st, data.iss.lat, data.iss.lon, tickNow, null, null, 0.28);
+
         const issHist = issHistRef.current;
         const last = issHist[issHist.length - 1];
-        if (!last || Math.abs(last.lon - data.iss.lon) >= TRAIL_MIN_DLL || Math.abs(last.lat - data.iss.lat) >= TRAIL_MIN_DLL) {
-          issHist.push({ lon: data.iss.lon, lat: data.iss.lat, t: nowMs });
+        if (!last || Math.abs(last.lon - st.dLon) >= TRAIL_MIN_DLL || Math.abs(last.lat - st.dLat) >= TRAIL_MIN_DLL) {
+          issHist.push({ lon: st.dLon, lat: st.dLat, t: nowMs });
           if (issHist.length > TRAIL_MAX) issHist.shift();
         }
-        if (visibleOn(projection, data.iss.lon, data.iss.lat)) {
-          const pt = projection([data.iss.lon, data.iss.lat]);
+        if (visibleOn(projection, st.dLon, st.dLat)) {
+          const pt = projection([st.dLon, st.dLat]);
           if (pt) {
             drawTrail(issHist, 'rgba(244,63,94,0)');
             const pulse = 0.5 + 0.5*Math.sin(now/400);
