@@ -266,6 +266,80 @@ function iconDot(ctx, cx, cy, size, color) {
   ctx.fill();
 }
 
+// ISO radiation trefoil — three 60° wedges at 120° intervals with a
+// center dot. Used for nuclear reactors.
+function iconRadiation(ctx, cx, cy, size, color) {
+  const r = size * 0.55;
+  ctx.fillStyle = color;
+  for (let i = 0; i < 3; i++) {
+    const a = -Math.PI / 2 + i * (2 * Math.PI / 3);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, a - Math.PI / 7, a + Math.PI / 7);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.max(1.1, r * 0.26), 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Small power-plant glyph: circle outline + bolt inside. Cheap enough to
+// draw thousands per frame for the WRI fleet layer.
+function iconPlant(ctx, cx, cy, size, color) {
+  const r = size * 0.48;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx + r * 0.20, cy - r * 0.55);
+  ctx.lineTo(cx - r * 0.28, cy + r * 0.08);
+  ctx.lineTo(cx - r * 0.02, cy + r * 0.08);
+  ctx.lineTo(cx - r * 0.20, cy + r * 0.55);
+  ctx.lineTo(cx + r * 0.28, cy - r * 0.08);
+  ctx.lineTo(cx + r * 0.02, cy - r * 0.08);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// News hotspot — filled core with a concentric pulse ring. Reads as a
+// "ping" and distinguishes news dots from outages / plant dots.
+function iconNews(ctx, cx, cy, size, color) {
+  const r = size * 0.5;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.max(1.0, r * 0.32), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.78, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+// Internet outage — filled core plus a broken signal-wave arc, so the
+// glyph reads as "interrupted connectivity" rather than a plain dot.
+function iconOutage(ctx, cx, cy, size, color) {
+  const r = size * 0.48;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.max(1.3, r * 0.34), 0, Math.PI * 2);
+  ctx.fill();
+  // Two opposing broken arcs — gap on each side reads as signal interruption.
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.0;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.78, -Math.PI * 0.35, Math.PI * 0.35);
+  ctx.moveTo(cx - r * 0.78, cy);
+  ctx.arc(cx, cy, r * 0.78, Math.PI - Math.PI * 0.35, Math.PI + Math.PI * 0.35);
+  ctx.stroke();
+}
+
 // Ship — elongated hull silhouette viewed top-down, oriented by heading (deg).
 // Designed at ~8px length so "scale=1" means ~8px long ship.
 function iconShip(ctx, cx, cy, heading, scale, color, stroke) {
@@ -2011,19 +2085,11 @@ function Globe({
         for (const rx of data.reactors) {
           if (!visibleOn(projection, rx.lon, rx.lat)) continue;
           const pt = projection([rx.lon, rx.lat]); if (!pt) continue;
-          const r = 2 + Math.min(2.2, (rx.capacity || 0) / 900);
-          octx.fillStyle = statusColor(rx.status) + 'd0';
-          octx.beginPath();
-          octx.arc(pt[0], pt[1], r, 0, Math.PI * 2);
-          octx.fill();
-          // Thin ring for operational reactors to lift them out of the
-          // background at low zoom.
-          if ((rx.status || '').toLowerCase().includes('operational')) {
-            octx.strokeStyle = '#22c55e';
-            octx.lineWidth = 0.6;
-            octx.stroke();
-          }
-          pushHit(pt[0], pt[1], Math.max(5, r + 2), 'reactor', rx);
+          // Size scales subtly with net MWe so a 1400 MW reactor reads as
+          // slightly larger than a 300 MW research unit.
+          const sz = 7 + Math.min(4, (rx.capacity || 0) / 700);
+          iconRadiation(octx, pt[0], pt[1], sz, statusColor(rx.status));
+          pushHit(pt[0], pt[1], Math.max(6, sz * 0.6), 'reactor', rx);
         }
         octx.restore();
       }
@@ -2063,14 +2129,26 @@ function Globe({
           if (!prev || p.capacity > prev.capacity) cell.set(key, p);
         }
         octx.save();
+        // At low zoom the LOD cluster keeps visible count ≤ ~180, so we
+        // can afford the full bolt-in-circle icon. At zoom ≥ 3 we're
+        // showing every individual plant in the viewport (could be
+        // thousands) so the dense dot is the readable choice.
+        const useIcon = zoom < 3;
         for (const p of cell.values()) {
           const pt = projection([p.lon, p.lat]); if (!pt) continue;
-          const r = 1.4 + Math.min(2.8, p.capacity / 1400);
-          octx.fillStyle = fuelColor(p.fuel) + 'cc';
-          octx.beginPath();
-          octx.arc(pt[0], pt[1], r, 0, Math.PI * 2);
-          octx.fill();
-          pushHit(pt[0], pt[1], Math.max(5, r + 1.5), 'plant', p);
+          const col = fuelColor(p.fuel);
+          if (useIcon) {
+            const sz = 6 + Math.min(3, p.capacity / 1200);
+            iconPlant(octx, pt[0], pt[1], sz, col);
+            pushHit(pt[0], pt[1], Math.max(5, sz * 0.55), 'plant', p);
+          } else {
+            const r = 1.4 + Math.min(2.8, p.capacity / 1400);
+            octx.fillStyle = col + 'cc';
+            octx.beginPath();
+            octx.arc(pt[0], pt[1], r, 0, Math.PI * 2);
+            octx.fill();
+            pushHit(pt[0], pt[1], Math.max(5, r + 1.5), 'plant', p);
+          }
         }
         octx.restore();
       }
@@ -2103,20 +2181,30 @@ function Globe({
           if (!prev || (n.mentions || 1) > (prev.mentions || 1)) cell.set(key, n);
         }
         octx.save();
+        // Pulse-ring icon at low zoom where visible count is bounded by
+        // the cell LOD (~200 max); plain dot at zoom ≥ 3 where every
+        // geocoded event is shown and the count can spike into the
+        // thousands.
+        const newsIcon = zoom < 3;
         for (const n of cell.values()) {
           const pt = projection([n.lon, n.lat]); if (!pt) continue;
           const col = quadColor(n.quad);
-          // Size bumps with log(mentions) so a story with 100 mentions
-          // is only ~2× the visible size of a single-mention event.
-          const r = 1.2 + Math.min(3.2, Math.log10(1 + (n.mentions || 1)));
-          // Opacity tracks |tone| so a boring story fades while a
-          // polarised one pops. Clamp to keep background cells visible.
+          // Alpha tracks |tone| so polarised stories pop and neutral
+          // noise fades.
           const alpha = Math.min(0.9, 0.35 + Math.min(1, Math.abs(n.tone || 0) / 6) * 0.5);
-          octx.fillStyle = col + Math.round(alpha * 255).toString(16).padStart(2, '0');
-          octx.beginPath();
-          octx.arc(pt[0], pt[1], r, 0, Math.PI * 2);
-          octx.fill();
-          pushHit(pt[0], pt[1], Math.max(5, r + 1.5), 'news', n);
+          const hex = col + Math.round(alpha * 255).toString(16).padStart(2, '0');
+          if (newsIcon) {
+            const sz = 5 + Math.min(4, Math.log10(1 + (n.mentions || 1)) * 1.6);
+            iconNews(octx, pt[0], pt[1], sz, hex);
+            pushHit(pt[0], pt[1], Math.max(5, sz * 0.55), 'news', n);
+          } else {
+            const r = 1.2 + Math.min(3.2, Math.log10(1 + (n.mentions || 1)));
+            octx.fillStyle = hex;
+            octx.beginPath();
+            octx.arc(pt[0], pt[1], r, 0, Math.PI * 2);
+            octx.fill();
+            pushHit(pt[0], pt[1], Math.max(5, r + 1.5), 'news', n);
+          }
         }
         octx.restore();
       }
@@ -2189,14 +2277,12 @@ function Globe({
                 cause === 'UNKNOWN' || cause === ''     ? '#64748b' :   // muted slate
                 cause === 'GOVERNMENT_DIRECTED'         ? '#ef4444' :   // red
                 /* default */                            '#ef4444';
-              // Core dot
-              octx.fillStyle = causeColor;
-              octx.beginPath();
-              octx.arc(px, py, 2.3, 0, Math.PI * 2);
-              octx.fill();
+              // Broken-signal glyph — reads as "interrupted connectivity"
+              // rather than a plain dot, while keeping the cause color.
+              iconOutage(octx, px, py, 10, causeColor);
               // Pulsing halo — ongoing incidents only. Resolved incidents
-              // still render as a small static dot so the historical
-              // context reads clearly when scrubbing the feed.
+              // still render as the static icon so historical context
+              // reads clearly when scrubbing the feed.
               if (o.ongoing) {
                 const r = 3 + pulse * 7;
                 const a = (1 - pulse) * 0.55;
