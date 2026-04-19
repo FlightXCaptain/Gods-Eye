@@ -72,11 +72,19 @@ function connectUpstream() {
   const server = 1 + Math.floor(Math.random() * 8);
   const url = `wss://ws${server}.blitzortung.org/`;
   console.log('[lightning] opening', url);
-  ws = new WebSocket(url, {
-    headers: {
-      'User-Agent': 'gods-eye/1.0 (+https://gods-eye-phi.vercel.app)',
-      'Origin':     'https://map.blitzortung.org',  // Blitzortung's own client origin; some servers require it
-    },
+  // Previous version sent custom Origin + UA headers in an attempt to
+  // look like a browser. Blitzortung appears to silently reject these —
+  // the WS would never reach the 'open' event and never emit 'error' or
+  // 'close' either, just hang until Vercel's 5-min timeout killed the
+  // function. Default ws library headers work fine for every other
+  // upstream we talk to; try the same here.
+  ws = new WebSocket(url);
+
+  ws.on('upgrade', (resp) => {
+    console.log('[lightning] upgrade response', resp.statusCode, resp.headers?.['sec-websocket-accept'] ? '(accept ok)' : '(no accept hdr)');
+  });
+  ws.on('unexpected-response', (req, resp) => {
+    console.warn('[lightning] unexpected-response', resp.statusCode, resp.statusMessage);
   });
 
   ws.on('open', () => {
