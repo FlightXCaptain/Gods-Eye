@@ -141,6 +141,30 @@ function iconIce(ctx, cx, cy, size, color) {
 }
 
 // Generic event: small square outline
+// Low-precision solar position (good to ~0.01° for present dates). Returns
+// the subsolar point in [lon, lat] degrees — i.e. the spot on Earth where
+// the sun is directly overhead at the given instant. Derived from the
+// Astronomical Almanac's low-precision formula; no external deps.
+//
+// For the day/night terminator we use the ANTISOLAR point (sun +180° lon,
+// negated lat) and draw a 90°-radius great-circle around it — every point
+// inside that circle is in night.
+function solarPosition(date) {
+  const d = (date - Date.UTC(2000, 0, 1, 12)) / 86400000;       // days since J2000
+  const g = (357.5291 + 0.98560028 * d) * Math.PI / 180;        // mean anomaly
+  const q = (280.459  + 0.98564736 * d) * Math.PI / 180;        // mean longitude
+  const L = q + ((1.915 * Math.sin(g) + 0.020 * Math.sin(2*g)) * Math.PI / 180);
+  const e = (23.439 - 0.00000036 * d) * Math.PI / 180;          // obliquity
+  const RA  = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L));
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  // Greenwich Mean Sidereal Time (hours), then to hour-angle of the sun.
+  const GMST = ((18.697374558 + 24.06570982441908 * d) % 24 + 24) % 24;
+  let lon = (RA * 180 / Math.PI) - GMST * 15;
+  lon = ((lon + 540) % 360) - 180;
+  const lat = dec * 180 / Math.PI;
+  return [lon, lat];
+}
+
 function iconEvent(ctx, cx, cy, size, color) {
   const s = size * 0.4;
   ctx.strokeStyle = color;
@@ -305,6 +329,17 @@ function Globe({
   const riversRef = useRef(null);           // Natural Earth rivers 50m
   const lakesRef = useRef(null);            // Natural Earth lakes 50m
   const citiesRef = useRef(null);           // Natural Earth populated places 50m
+
+  // Day/night terminator drifts ~15°/hour. If the user isn't rotating
+  // the globe, the base canvas isn't redrawing — and the terminator
+  // would silently lag. A once-per-minute tick marks the base dirty so
+  // the shade stays current. One pixel of drift per minute at any
+  // reasonable zoom is imperceptible, so 60 s is plenty.
+  useEffect(() => {
+    if (!layers?.daynight) return;
+    const id = setInterval(() => { dirtyBase.current = true; }, 60 * 1000);
+    return () => clearInterval(id);
+  }, [layers?.daynight]);
 
   // Zoom-out signal — parent increments zoomOutSignal when auto-rotate is
   // re-enabled via the toolbar button; we animate back to the default scale
@@ -1043,6 +1078,23 @@ function Globe({
           const gridAlpha = isDark ? (zoomB > 2.2 ? 0.04 : 0.07) : (zoomB > 2.2 ? 0.05 : 0.09);
           bctx.strokeStyle = isDark ? `rgba(255,255,255,${gridAlpha})` : `rgba(20,30,60,${gridAlpha})`;
           bctx.lineWidth = 0.5; bctx.stroke();
+        }
+
+        // Day / night terminator — shade the night hemisphere. The antisolar
+        // point is 180° opposite the subsolar point; every location within
+        // 90° of antisolar is currently in night. d3.geoCircle builds the
+        // GeoJSON polygon with proper horizon-aware clipping on the
+        // orthographic projection. Subtle dark tint so country borders and
+        // coastlines still read through it.
+        if (layers.daynight) {
+          const sub = solarPosition(Date.now());
+          const antiLon = ((sub[0] + 180 + 540) % 360) - 180;
+          const antiLat = -sub[1];
+          const nightPoly = d3.geoCircle().center([antiLon, antiLat]).radius(90)();
+          bctx.beginPath();
+          path(nightPoly);
+          bctx.fillStyle = isDark ? 'rgba(0,0,0,0.35)' : 'rgba(10,14,32,0.22)';
+          bctx.fill();
         }
 
         // Lakes (filled) — zoom ≥ 1.2. Painted before land outline so the land
