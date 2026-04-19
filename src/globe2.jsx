@@ -358,6 +358,13 @@ function Globe({
   const windParticlesRef = useRef([]);
   const windViewRef = useRef(null);   // last rot/scale snapshot for smear detection
   const WIND_PARTICLE_COUNT = 2000;
+  // Ocean currents — same data shape as wind (5° u/v grid in m/s) so the
+  // same particle advection engine drives them. Separate pool + view
+  // tracker so pan-smear detection doesn't share state with wind.
+  const oceanGridRef = useRef(null);
+  const oceanParticlesRef = useRef([]);
+  const oceanViewRef = useRef(null);
+  const OCEAN_PARTICLE_COUNT = 1400;
   // Auto-rotate runs whenever the `autoRotate` prop is true. On any user
   // interaction we fire `onInteract` so the parent can flip it off; to resume
   // the user clicks the toolbar rotate button (also triggers zoomOutSignal).
@@ -433,6 +440,13 @@ function Globe({
   useEffect(() => {
     if (typeof window.subscribeWind !== 'function') return;
     return window.subscribeWind((g) => { windGridRef.current = g; });
+  }, []);
+
+  // Ocean currents — same subscribe pattern, different grid ref (see
+  // src/ocean-currents.jsx).
+  useEffect(() => {
+    if (typeof window.subscribeOceanCurrents !== 'function') return;
+    return window.subscribeOceanCurrents((g) => { oceanGridRef.current = g; });
   }, []);
 
   // Live position of the currently-tracked object — written every frame by
@@ -511,6 +525,22 @@ function Globe({
       };
     }
     windParticlesRef.current = pool;
+  }, [width, height]);
+
+  // Ocean particle pool. Narrower lat range (±80°) since the grid is
+  // bounded there and currents beyond are meaningless for the viz.
+  useEffect(() => {
+    const pool = new Array(OCEAN_PARTICLE_COUNT);
+    for (let i = 0; i < OCEAN_PARTICLE_COUNT; i++) {
+      pool[i] = {
+        lon: Math.random() * 360 - 180,
+        lat: (Math.random() - 0.5) * 160,
+        age: Math.random() * 400,
+        maxAge: 360 + Math.floor(Math.random() * 800), // longer streamers for slow flows
+        prevX: null, prevY: null,
+      };
+    }
+    oceanParticlesRef.current = pool;
   }, [width, height]);
 
   // Periodic prune of trail history — drop entries whose newest point is older
@@ -1438,9 +1468,109 @@ function Globe({
           }
           p.prevX = pt[0]; p.prevY = pt[1];
         }
-      } else if (wctx && !layers.wind) {
-        // Layer is off — clear the wind canvas once per frame cheaply.
+      } else if (wctx && !layers.wind && !layers.oceanCurrents) {
+        // Both flow layers off — clear the shared canvas once per frame.
         wctx.clearRect(0, 0, width, height);
+      }
+
+      // Ocean currents — mirror of the wind particle engine, sharing the
+      // same fade-clear canvas so wind-over-land and currents-over-sea
+      // render side by side naturally. Slower effective motion (currents
+      // rarely exceed 2 m/s vs wind's 30+ m/s) but longer streamers.
+      if (layers.oceanCurrents && oceanGridRef.current) {
+        const g = oceanGridRef.current;
+        const { latMin, lonMin, latStep, lonStep, nLat, nLon, u, v } = g;
+        const sampleCur = (lon, lat) => {
+          let x = (lon - lonMin) / lonStep;
+          let y = (lat - latMin) / latStep;
+          if (x < 0) x += nLon; if (x >= nLon) x -= nLon;
+          if (y < 0 || y >= nLat - 1) return null;
+          const x0 = Math.floor(x) % nLon;
+          const x1 = (x0 + 1) % nLon;
+          const y0 = Math.floor(y);
+          const y1 = y0 + 1;
+          const fx = x - Math.floor(x), fy = y - y0;
+          const i00 = y0 * nLon + x0, i10 = y0 * nLon + x1;
+          const i01 = y1 * nLon + x0, i11 = y1 * nLon + x1;
+          const uu = (1-fx)*(1-fy)*u[i00] + fx*(1-fy)*u[i10] + (1-fx)*fy*u[i01] + fx*fy*u[i11];
+          const vv = (1-fx)*(1-fy)*v[i00] + fx*(1-fy)*v[i10] + (1-fx)*fy*v[i01] + fx*fy*v[i11];
+          return [uu, vv];
+        };
+
+        const oview = oceanViewRef.current;
+        const rNow = rotRef.current, sNow = scaleRef.current;
+        const omoved = !oview
+          || Math.abs(oview[0] - rNow[0]) > 0.6
+          || Math.abs(oview[1] - rNow[1]) > 0.6
+          || Math.abs(oview[2] - sNow) > 2.0;
+        if (omoved) {
+          const ps = oceanParticlesRef.current;
+          for (let i = 0; i < ps.length; i++) { ps[i].prevX = null; ps[i].prevY = null; }
+          oceanViewRef.current = [rNow[0], rNow[1], sNow];
+        }
+        // Skip the fade-clear if the wind layer already did it this frame.
+        if (!layers.wind) {
+          wctx.save();
+          wctx.globalCompositeOperation = 'destination-out';
+          wctx.fillStyle = `rgba(0,0,0,${isDarkW ? 0.02 : 0.035})`;
+          wctx.fillRect(0, 0, width, height);
+          wctx.restore();
+        }
+
+        // Deep-water palette: currents never get "warm". Calm flows read
+        // as deep teal; the Gulf Stream, Kuroshio, and similar jets pop
+        // bright cyan.
+        const currentColor = (speed, alpha) => {
+          const t = Math.min(speed / 1.6, 1); // cap near Kuroshio peak (~1.5 m/s)
+          const hue = 190 + t * 20;           // 190 teal → 210 cyan-blue
+          const sat = 70 + t * 20;
+          const light = 45 + t * 15;
+          return `hsla(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%, ${alpha})`;
+        };
+
+        // Ocean currents are ~10-20× slower than wind, so to keep visible
+        // motion comparable we scale ~15× larger than WIND's 0.025.
+        const OCEAN_SCALE = 0.35;
+        const particles = oceanParticlesRef.current;
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          p.age++;
+          if (p.age > p.maxAge || p.lat > 82 || p.lat < -82) {
+            p.lon = Math.random() * 360 - 180;
+            p.lat = (Math.random() - 0.5) * 160;
+            p.age = 0;
+            p.prevX = null; p.prevY = null;
+            continue;
+          }
+          const w = sampleCur(p.lon, p.lat);
+          if (!w) continue;
+          const [uu, vv] = w;
+          const speed = Math.hypot(uu, vv);
+          // Skip advancing stagnant particles so they respawn elsewhere.
+          if (speed < 0.02) {
+            p.age += 20;
+            continue;
+          }
+          const dirX = uu / speed, dirY = vv / speed;
+          const latRad = p.lat * Math.PI / 180;
+          const cosLat = Math.max(0.05, Math.cos(latRad));
+          p.lat += dirY * speed * OCEAN_SCALE;
+          p.lon += (dirX * speed * OCEAN_SCALE) / cosLat;
+          if (p.lon > 180) p.lon -= 360;
+          if (p.lon < -180) p.lon += 360;
+          if (!visibleOn(projection, p.lon, p.lat)) { p.prevX = null; p.prevY = null; continue; }
+          const pt = projection([p.lon, p.lat]);
+          if (!pt) continue;
+          if (p.prevX != null && p.prevY != null) {
+            wctx.beginPath();
+            wctx.moveTo(p.prevX, p.prevY);
+            wctx.lineTo(pt[0], pt[1]);
+            wctx.strokeStyle = currentColor(speed, 0.8);
+            wctx.lineWidth = 1.1;
+            wctx.stroke();
+          }
+          p.prevX = pt[0]; p.prevY = pt[1];
+        }
       }
 
       // Overlay (dynamic)
