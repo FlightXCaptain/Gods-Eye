@@ -369,6 +369,15 @@ function Globe({
   // position forever. null when nothing is being tracked.
   const focusLiveCoordsRef = useRef(null);
 
+  // NASA FIRMS thermal hotspot detections. Small (15-40k points) and
+  // refreshed only every 15 min, so a ref is fine — no need to re-render
+  // on every update.
+  const firesRef = useRef([]);
+  useEffect(() => {
+    if (typeof window.subscribeFires !== 'function') return;
+    return window.subscribeFires((list) => { firesRef.current = list || []; });
+  }, []);
+
   // When the focused target is a ship, we load its 30-day IndexedDB
   // history and stash the polyline here. The draw loop renders it on the
   // overlay canvas with age-based alpha fade. Cleared when focus moves
@@ -1478,6 +1487,50 @@ function Globe({
         }
       }
 
+      // NASA FIRMS thermal hotspots — individual fire pixels. LOD-decimated
+      // because 15-40k points would dogpile at low zoom; spatial binning
+      // collapses dense clusters to a single hot dot while preserving the
+      // "fire-line" shape at higher zoom.
+      if (layers.fires && firesRef.current && firesRef.current.length) {
+        const pts = [];
+        for (const f of firesRef.current) {
+          if (typeof f.lat !== 'number' || typeof f.lon !== 'number') continue;
+          if (!visibleOn(projection, f.lon, f.lat)) continue;
+          const pt = projection([f.lon, f.lat]); if (!pt) continue;
+          pts.push({ px: pt[0], py: pt[1], f });
+        }
+        // Smaller cell than events — we WANT the fire-line shape to read.
+        const lod = classifyLOD(pts, Math.max(10, 18 / zoom));
+        for (let i = 0; i < pts.length; i++) {
+          const { px, py, f } = pts[i];
+          const { mode } = lod[i];
+          // Confidence 0..2 → low/nominal/high. Higher = hotter colour + brighter.
+          const hot = f.conf >= 2;
+          const col = hot ? 'rgba(251, 146, 60, 0.95)' : 'rgba(239, 68, 68, 0.80)';
+          const r = mode === 'full' ? 2.2 : mode === 'compact' ? 1.6 : 1.1;
+          octx.fillStyle = col;
+          octx.beginPath();
+          octx.arc(px, py, r, 0, Math.PI * 2);
+          octx.fill();
+          // Full-mode high-confidence fires get a soft halo glow.
+          if (mode === 'full' && hot) {
+            const g = octx.createRadialGradient(px, py, 0, px, py, 6);
+            g.addColorStop(0,   'rgba(254, 215, 170, 0.5)');
+            g.addColorStop(1,   'rgba(254, 215, 170, 0)');
+            octx.fillStyle = g;
+            octx.beginPath();
+            octx.arc(px, py, 6, 0, Math.PI * 2);
+            octx.fill();
+          }
+          // Push a hit only for high-confidence / full detections so the
+          // dossier doesn't pop on every glancing mouse pass over a fire
+          // complex with hundreds of pixels.
+          if (mode === 'full') {
+            pushHit(px, py, 3, 'fire', f);
+          }
+        }
+      }
+
       // Plane glyph — clean aviation-tracker silhouette, designed at 10px
       // nose-to-tail. Shared between flight rendering below.
       const planeFill   = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.88)';
@@ -1862,6 +1915,9 @@ function Globe({
           })()}
           {hover._layer === 'quake' && <span>M{hover.mag?.toFixed(1)} · {hover.place}</span>}
           {hover._layer === 'event' && <span>{hover.category} · {hover.title}</span>}
+          {hover._layer === 'fire' && (
+            <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>
+          )}
           {hover._layer === 'tsunami' && <span>Tsunami · {hover.location || hover.country} {hover.year || ''}</span>}
           {hover._layer === 'city' && <span>{hover.name}{hover.country ? ` · ${hover.country}` : ''}</span>}
           {hover._layer === 'cluster' && <span>{hover.count} {hover.layer}{hover.count>1?'s':''} — click to zoom</span>}
