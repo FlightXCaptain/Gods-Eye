@@ -1204,7 +1204,17 @@ function App() {
       const fresh = entries.filter(e => !seen.has(e.key));
       if (!fresh.length) return prev;
       for (const f of fresh) seen.add(f.key);
-      return [...fresh, ...prev].slice(0, 80);
+      const next = [...fresh, ...prev].slice(0, 80);
+      // Keep the dedup Set from growing without bound. Anything that's
+      // scrolled off the visible 80-entry feed can never show up again
+      // anyway, so rebuilding the Set to match the feed is safe and caps
+      // memory at the feed-length budget instead of "every event seen
+      // this session".
+      if (seen.size > 2000) {
+        seen.clear();
+        for (const e of next) seen.add(e.key);
+      }
+      return next;
     });
   }, [feedPaused]);
 
