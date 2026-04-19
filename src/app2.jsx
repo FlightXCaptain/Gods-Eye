@@ -295,6 +295,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) 
     ['iss','ISS',         'iss',     '#f43f5e'],
     ['quakes','Seismic',  'quake',   '#fb923c'],
     ['events','Natural events', 'fire', '#ef4444'],
+    ['fires','Active fire pixels', 'fire', '#fb923c'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
     ['wind','Wind flow',  'aurora',  '#60a5fa'],
     ['daynight','Day / night shade', 'moon',  '#94a3b8'],
@@ -453,6 +454,7 @@ function Dossier({ item, onClose }) {
               : layer === 'ship' ? 'Vessel'
               : layer === 'quake' ? 'Seismic'
               : layer === 'event' ? 'Natural'
+              : layer === 'fire' ? 'Thermal'
               : layer === 'sat' ? 'Satellite'
               : layer === 'city' ? 'City'
               : layer === 'country' ? 'Country'
@@ -517,6 +519,17 @@ function Dossier({ item, onClose }) {
           <KV k="Type" v={item.category}/>
           <KV k="Updated" v={fmtTime(item.time)}/>
           {item.link && <a href={item.link} target="_blank" className="text-xs text-accent-500 underline">NASA EONET →</a>}
+        </>}
+        {layer === 'fire' && <>
+          <div className="text-lg">Thermal hotspot</div>
+          <div className="text-sm opacity-70">VIIRS / NASA FIRMS</div>
+          <KV k="Confidence" v={item.conf >= 2 ? 'High' : item.conf === 1 ? 'Nominal' : 'Low'}/>
+          {item.bright != null && <KV k="Brightness" v={`${item.bright} K`}/>}
+          {item.frp != null && <KV k="Fire power" v={`${item.frp} MW`}/>}
+          {item.t && <KV k="Acquired" v={fmtTime(item.t)}/>}
+          <KV k="Time of day" v={item.day ? 'Day pass' : 'Night pass'}/>
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href="https://firms.modaps.eosdis.nasa.gov/" target="_blank" rel="noopener" className="text-xs text-accent-500 underline">NASA FIRMS →</a>
         </>}
         {layer === 'city' && <>
           <div className="text-lg">{item.name}</div>
@@ -859,7 +872,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, tsunamis:false, wind:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, tsunamis:false, wind:false };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
