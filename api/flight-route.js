@@ -112,21 +112,44 @@ async function loadAirports() {
 
 // ── OpenSky ─────────────────────────────────────────────────────────
 
+// IMPORTANT: As of 2025/2026, OpenSky restricts /flights/aircraft to
+// AUTHENTICATED users only. Anonymous requests receive 403 "You cannot
+// access historical flights". The only way to get route data is to set
+// OPENSKY_USERNAME and OPENSKY_PASSWORD env vars on the deployment
+// (free account at https://opensky-network.org/register/).
+// Without those credentials, this endpoint gracefully reports 503 with
+// `auth_required: true` so the client can silently hide the route UI
+// instead of surfacing confusing errors.
+
 async function fetchMostRecentFlight(icao24) {
+  const u = process.env.OPENSKY_USERNAME, p = process.env.OPENSKY_PASSWORD;
+  const hasAuth = !!(u && p);
   const now   = Math.floor(Date.now() / 1000);
   const begin = now - OPENSKY_LOOKBACK_S;
   const end   = now + (OPENSKY_WINDOW_S - OPENSKY_LOOKBACK_S);
   const url = `${OPENSKY_BASE}/flights/aircraft?icao24=${icao24}&begin=${begin}&end=${end}`;
-  const headers = {};
-  const u = process.env.OPENSKY_USERNAME, p = process.env.OPENSKY_PASSWORD;
-  if (u && p) headers.Authorization = 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64');
+  const headers = {
+    // Explicit UA so our callers are identifiable; default node UA is
+    // sometimes rejected by APIs.
+    'User-Agent': 'gods-eye/1.0 (+https://gods-eye-phi.vercel.app)',
+    'Accept':     'application/json',
+  };
+  if (hasAuth) headers.Authorization = 'Basic ' + Buffer.from(`${u}:${p}`).toString('base64');
 
   const res = await fetch(url, { headers });
+  if (res.status === 403) {
+    // OpenSky explicitly rejects the request — usually means no auth.
+    const body = await res.text().catch(() => '');
+    const err = new Error(hasAuth
+      ? 'opensky 403: ' + body.slice(0, 120)
+      : 'opensky requires authentication — set OPENSKY_USERNAME and OPENSKY_PASSWORD');
+    err.authRequired = !hasAuth;
+    throw err;
+  }
   if (res.status === 404 || res.status === 429) return null;
   if (!res.ok) throw new Error('opensky HTTP ' + res.status);
   const flights = await res.json();
   if (!Array.isArray(flights) || !flights.length) return null;
-  // Sort newest-first and pick the top one.
   flights.sort((a, b) => (b.firstSeen || 0) - (a.firstSeen || 0));
   return flights[0];
 }
@@ -168,8 +191,20 @@ export default async function handler(req, res) {
     return;
   }
   if (flightSettle.status === 'rejected') {
-    console.warn('[flight-route] opensky failed:', flightSettle.reason?.message);
-    res.status(502).json({ error: 'opensky unavailable', detail: String(flightSettle.reason?.message || flightSettle.reason) });
+    const reason = flightSettle.reason;
+    console.warn('[flight-route] opensky failed:', reason?.message);
+    // Auth-required: 503 + explicit flag so the client treats this as
+    // "feature disabled on this deployment" rather than a transient error.
+    if (reason?.authRequired) {
+      res.setHeader('Cache-Control', 'public, s-maxage=3600');
+      res.status(503).json({
+        error: 'opensky auth required',
+        detail: reason.message,
+        auth_required: true,
+      });
+      return;
+    }
+    res.status(502).json({ error: 'opensky unavailable', detail: String(reason?.message || reason) });
     return;
   }
   const airports = airportsSettle.value;
