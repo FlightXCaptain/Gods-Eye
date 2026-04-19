@@ -453,6 +453,13 @@ function Globe({
     return window.subscribeOceanCurrents((g) => { oceanGridRef.current = g; });
   }, []);
 
+  // Cables live on the basemap canvas — invalidate when the cable data
+  // arrives or the toggle flips, otherwise the basemap wouldn't redraw
+  // until the user happens to pan.
+  useEffect(() => {
+    dirtyBase.current = true;
+  }, [data?.cables, layers?.cables]);
+
   // Live position of the currently-tracked object — written every frame by
   // the tracking block in the tick loop, read by the reticle renderer so
   // the ring follows a moving target instead of sitting at the dblclick
@@ -1230,9 +1237,16 @@ function Globe({
       // Draw base (only when dirty AND enough time has passed) — the base
       // layer re-projects country polygons, states, rivers, lakes, and
       // cities; on mobile a 60-120 Hz touchmove stream used to redraw all
-      // of that on every frame, making drag/pinch feel janky. Cap to
-      // ~45 FPS (22 ms) — imperceptible drift, massive CPU savings.
-      const BASE_REDRAW_MIN_MS = 22;
+      // of that on every frame, making drag/pinch feel janky.
+      //
+      // Two regimes:
+      //   • User interacting (drag / pinch / zoom): cap ~45 fps (22 ms).
+      //     Any coarser is perceptible as stutter during manual input.
+      //   • Idle auto-rotate: cap ~15 fps (66 ms). The globe drifts at
+      //     4°/s — that's 0.26° between redraws at 15 fps, well below
+      //     the threshold of visible stepping. Stacks with the basemap
+      //     LOD (110m during auto-rotate) so idle cost is minimal.
+      const BASE_REDRAW_MIN_MS = autoRotate && !focusTarget ? 66 : 22;
       if (dirtyBase.current && (tickNow - lastBaseRedrawMsRef.current) >= BASE_REDRAW_MIN_MS) {
         lastBaseRedrawMsRef.current = tickNow;
         bctx.clearRect(0,0,width,height);
@@ -1279,6 +1293,31 @@ function Globe({
           bctx.fill();
           bctx.strokeStyle = isDark ? 'rgba(56,189,248,0.3)' : 'rgba(14,116,144,0.35)';
           bctx.lineWidth = 0.5; bctx.stroke();
+        }
+
+        // Submarine communications cables (TeleGeography). Painted on the
+        // basemap canvas — hundreds of polylines with tens of thousands of
+        // coords combined; re-projecting them every overlay frame was a
+        // real tax. On the basemap they only cost on view change (now
+        // properly LOD-throttled during auto-rotate too).
+        if (layers.cables && Array.isArray(data.cables) && data.cables.length) {
+          bctx.save();
+          bctx.lineWidth = 0.7;
+          // Group by TeleGeography's per-route color — ~20 hues across
+          // 700+ cables, so ~20 state changes instead of 700.
+          const byColor = new Map();
+          for (const c of data.cables) {
+            const arr = byColor.get(c.color) || [];
+            arr.push(c.geometry);
+            byColor.set(c.color, arr);
+          }
+          for (const [col, geoms] of byColor) {
+            bctx.strokeStyle = col + (isDark ? '88' : 'aa');
+            bctx.beginPath();
+            for (const g of geoms) path(g);
+            bctx.stroke();
+          }
+          bctx.restore();
         }
 
         // Land — wireframe outline (the signature look). Pick the
@@ -1932,31 +1971,6 @@ function Globe({
         }
       }
 
-      // Submarine communications cables (TeleGeography). Drawn at low
-      // opacity on the overlay so the wireframe land stays dominant; the
-      // cable mesh reads as a subtle subsea network pattern. Rendered
-      // below the outage + reactor + plant dots so markers sit on top.
-      if (layers.cables && Array.isArray(data.cables) && data.cables.length) {
-        const cpath = d3.geoPath(projection, octx);
-        octx.save();
-        octx.lineWidth = 0.7;
-        // Group cables by color so we minimise state changes — there are
-        // ~560 cables but TeleGeography uses ~20 distinct route colors.
-        const byColor = new Map();
-        for (const c of data.cables) {
-          const arr = byColor.get(c.color) || [];
-          arr.push(c.geometry);
-          byColor.set(c.color, arr);
-        }
-        for (const [col, geoms] of byColor) {
-          octx.strokeStyle = col + (isDark ? '88' : 'aa');
-          octx.beginPath();
-          for (const g of geoms) cpath(g);
-          octx.stroke();
-        }
-        octx.restore();
-      }
-
       // Nuclear reactors (GeoNuclearData). Color by operational status,
       // size subtly scaled with net MWe. Always-visible (no LOD cluster)
       // because the global fleet is only ~800 reactors.
@@ -2196,15 +2210,20 @@ function Globe({
           octx.beginPath();
           octx.arc(pt[0], pt[1], 1.5, 0, Math.PI * 2);
           octx.fill();
-          // Halo (expands + fades slightly faster than core)
+          // Halo (expands + fades slightly faster than core). Faked as
+          // two alpha-stacked circles rather than allocating a fresh
+          // createRadialGradient per strike per frame — at the radii used
+          // here the visual difference is imperceptible and we avoid the
+          // GC churn on lightning-heavy frames.
           const haloR = 3 + age * 9;
           const haloAlpha = Math.max(0, (1 - age) * 0.55);
-          const g = octx.createRadialGradient(pt[0], pt[1], 0, pt[0], pt[1], haloR);
-          g.addColorStop(0, `rgba(254, 240, 138, ${haloAlpha.toFixed(3)})`);
-          g.addColorStop(1, 'rgba(254, 240, 138, 0)');
-          octx.fillStyle = g;
+          octx.fillStyle = `rgba(254, 240, 138, ${(haloAlpha * 0.4).toFixed(3)})`;
           octx.beginPath();
           octx.arc(pt[0], pt[1], haloR, 0, Math.PI * 2);
+          octx.fill();
+          octx.fillStyle = `rgba(254, 240, 138, ${haloAlpha.toFixed(3)})`;
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], haloR * 0.5, 0, Math.PI * 2);
           octx.fill();
         }
       }
@@ -2234,14 +2253,18 @@ function Globe({
           octx.beginPath();
           octx.arc(px, py, r, 0, Math.PI * 2);
           octx.fill();
-          // Full-mode high-confidence fires get a soft halo glow.
+          // Full-mode high-confidence fires get a soft halo glow. Two
+          // alpha-stacked circles stand in for a radial gradient — on a
+          // fire-heavy frame we'd otherwise allocate a thousand-plus
+          // gradient objects per second for the GC to chew through.
           if (mode === 'full' && hot) {
-            const g = octx.createRadialGradient(px, py, 0, px, py, 6);
-            g.addColorStop(0,   'rgba(254, 215, 170, 0.5)');
-            g.addColorStop(1,   'rgba(254, 215, 170, 0)');
-            octx.fillStyle = g;
+            octx.fillStyle = 'rgba(254, 215, 170, 0.18)';
             octx.beginPath();
             octx.arc(px, py, 6, 0, Math.PI * 2);
+            octx.fill();
+            octx.fillStyle = 'rgba(254, 215, 170, 0.35)';
+            octx.beginPath();
+            octx.arc(px, py, 3.4, 0, Math.PI * 2);
             octx.fill();
           }
           // Push a hit only for high-confidence / full detections so the
@@ -2344,6 +2367,13 @@ function Globe({
             st.anchorT   = tickNow;
             st.lastTs    = f._ts;
           }
+
+          // Early visibility cull before the dead-reckoning + ease math.
+          // Skip the ~12 ops/flight for aircraft behind the horizon. Check
+          // both the raw ADS-B position AND the eased display position so
+          // flights rotating into view from either direction aren't missed.
+          if (!visibleOn(projection, f.lon, f.lat) &&
+              !visibleOn(projection, st.displayLon, st.displayLat)) continue;
 
           // Dead-reckon from anchor forward by elapsed time × velocity.
           const dtSec = Math.min(DR_MAX_AGE_S, (tickNow - st.anchorT) / 1000);
