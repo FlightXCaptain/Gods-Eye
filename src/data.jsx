@@ -265,6 +265,46 @@ async function fetchNHC() {
   return out;
 }
 
+// Internet outages / anomalies from Cloudflare Radar. The raw API needs a
+// bearer token so we go through our own /api/radar-outages proxy, which
+// caches 5 min and strips the payload to the fields we render. Scope is
+// 28 days rolling — long enough for ongoing incidents to stay on the map,
+// short enough to keep the list focused on current events.
+async function fetchInternetOutages() {
+  const j = await safeFetch('/api/radar-outages');
+  if (!Array.isArray(j)) return [];
+  const out = [];
+  for (const o of j) {
+    // Deterministic alpha-2 "anchor" for placement — prefer the first
+    // location, fall back to the first ASN's registered country. Outages
+    // with neither are dropped since there's nowhere honest to put them.
+    const anchor = o.locations?.[0]?.code
+                 || o.asns?.[0]?.location?.code
+                 || null;
+    if (!anchor) continue;
+    const start = o.startDate ? new Date(o.startDate).getTime() : Date.now();
+    const end   = o.endDate   ? new Date(o.endDate).getTime()   : null;
+    out.push({
+      id: String(o.id),
+      anchor, // ISO alpha-2
+      description: o.description || '',
+      cause: o.cause || null,
+      outageType: o.outageType || null,
+      scope: o.scope || null,
+      eventType: o.eventType || null,
+      locations: o.locations || [],
+      asns: o.asns || [],
+      linkedUrl: o.linkedUrl || null,
+      startTime: start,
+      endTime: end,
+      time: end || start, // for "X ago" display — end if closed, else start
+      ongoing: end == null,
+      kind: 'outage',
+    });
+  }
+  return out;
+}
+
 async function fetchKp() {
   const j = await safeFetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json');
   if (!Array.isArray(j)) return null;
@@ -444,6 +484,6 @@ function propagateSats(tleList, when) {
 
 Object.assign(window, {
   fetchQuakes, fetchISS, fetchFlights, fetchEONET, fetchNHC, fetchKp, fetchAurora,
-  fetchTsunamis, fetchSatellites, propagateSats, loadSatcat,
+  fetchTsunamis, fetchInternetOutages, fetchSatellites, propagateSats, loadSatcat,
   subscribeWikiEdits, COUNTRY_POINTS,
 });
