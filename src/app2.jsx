@@ -275,16 +275,6 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <circle cx="7" cy="7" r="4" stroke={color} strokeWidth="0.8" opacity="0.4"/>
         </svg>
       );
-    case 'camera':
-      // Compact camera silhouette: body + lens bump + viewfinder nub.
-      return (
-        <svg {...props}>
-          <rect x="2" y="5" width="10" height="6.5" rx="1" fill={color}/>
-          <rect x="5" y="3.5" width="4" height="1.8" fill={color}/>
-          <circle cx="7" cy="8.3" r="1.8" fill="rgba(0,0,0,0.55)"/>
-          <circle cx="7" cy="8.3" r="0.8" fill={color} opacity="0.85"/>
-        </svg>
-      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -300,7 +290,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) 
     ['events','Natural events', 'fire', '#ef4444'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
     ['wind','Wind flow',  'aurora',  '#60a5fa'],
-    ['cameras','Live cameras', 'camera', '#f472b6'],
     ['tsunamis','Tsunami archive', 'tsunami', '#22d3ee'],
   ];
   return (
@@ -460,7 +449,6 @@ function Dossier({ item, onClose }) {
               : layer === 'city' ? 'City'
               : layer === 'country' ? 'Country'
               : layer === 'lake' ? 'Hydrography'
-              : layer === 'camera' ? 'Live camera'
               : 'Object'}
           </span>
         </div>
@@ -550,59 +538,6 @@ function Dossier({ item, onClose }) {
           {item.name !== 'Unnamed lake' && (
             <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
           )}
-        </>}
-        {layer === 'camera' && <>
-          <div className="text-lg">{item.title}</div>
-          {item.category && (
-            <div className="text-sm opacity-70 capitalize">{item.category}{item.source ? ` · ${item.source}` : ''}</div>
-          )}
-          {/* Thumbnail — click-to-play. Whole thumbnail is the hit target so
-              it reads as "press play on this preview." Hide on load failure
-              so broken hosts don't show a stock browser placeholder. */}
-          {item.thumbnailUrl && (
-            <button
-              type="button"
-              onClick={() => { if (typeof window.openCameraPlayer === 'function') window.openCameraPlayer(item); }}
-              className="-mx-1 block w-full rounded-xl overflow-hidden border border-black/10 dark:border-white/10 relative group cursor-pointer"
-              title="Open live player"
-            >
-              <img
-                src={item.thumbnailUrl}
-                alt={item.title}
-                className="w-full h-auto block"
-                loading="lazy"
-                referrerPolicy="no-referrer"
-                onError={(e) => { e.currentTarget.parentElement.style.display = 'none'; }}
-              />
-              {/* Play-button overlay */}
-              <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 transition">
-                <span className="w-10 h-10 rounded-full bg-accent-500/85 flex items-center justify-center shadow-lg opacity-80 group-hover:opacity-100 transition">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M8 5l12 7-12 7z"/></svg>
-                </span>
-              </span>
-            </button>
-          )}
-          <KV k="Position" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
-          {/* Primary action: open the embed player modal. Falls through to
-              a link for link-only cams. */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {item.embed && item.embed.type !== 'link-only' ? (
-              <button
-                type="button"
-                onClick={() => { if (typeof window.openCameraPlayer === 'function') window.openCameraPlayer(item); }}
-                className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500 text-white hover:bg-accent-600 transition inline-flex items-center gap-1.5"
-              >
-                <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M8 5l12 7-12 7z"/></svg>
-                Watch live
-              </button>
-            ) : (
-              item.pageUrl && (
-                <a href={item.pageUrl} target="_blank" rel="noopener" className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition">
-                  Open source ↗
-                </a>
-              )
-            )}
-          </div>
         </>}
         {hasCoords && (
           <div className="pt-1 text-[10px] font-mono opacity-50 uppercase tracking-wider">
@@ -832,7 +767,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, cameras:true, tsunamis:false, wind:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, tsunamis:false, wind:false };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
@@ -1177,17 +1112,18 @@ function App() {
             // Double-clicking a marker zooms in and (for moving objects)
             // keeps the globe centred on it. Per-layer zoom presets — wide
             // for fast/broad targets (ISS, country), close for stationary
-            // POIs (ship, camera). The trackId / trackLayer fields let the
+            // POIs (ship, city). The trackId / trackLayer fields let the
             // Globe tick loop re-resolve the object's live position every
             // frame.
             const layer = hit._layer;
-            // Zoom factors scale the default globe size. Tuned so tracked
-            // moving objects fill a useful chunk of the viewport — earlier
-            // values were too timid and the target looked like a speck.
+            // Zoom factors scale the default globe size. Flights and ships
+            // pull tight so the marker fills a useful chunk of the viewport
+            // and you can read the callsign/name clearly. ISS and sats stay
+            // modest because they move fast — over-zooming loses them.
             const zoomByLayer = {
               iss: 3, sat: 3, country: 2.5,
               event: 4, lake: 4, quake: 5,
-              flight: 6, city: 6, ship: 7, camera: 7,
+              city: 6, flight: 12, ship: 14,
             };
             const labelFor = (it, l) => {
               switch (l) {
@@ -1200,7 +1136,6 @@ function App() {
                 case 'lake':    return it.name || 'Lake';
                 case 'quake':   return `M${typeof it.mag === 'number' ? it.mag.toFixed(1) : '?'} · ${it.place || 'Earthquake'}`;
                 case 'event':   return it.title || 'Event';
-                case 'camera':  return it.title || 'Live camera';
                 default:        return 'Target';
               }
             };
