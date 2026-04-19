@@ -155,42 +155,49 @@ export default async function handler(req, res) {
     return;
   }
 
-  try {
-    const [airports, flight] = await Promise.all([
-      loadAirports(),
-      fetchMostRecentFlight(icao24),
-    ]);
-    if (!flight || !flight.estDepartureAirport || !flight.estArrivalAirport) {
-      routeCache.set(icao24, { t: Date.now(), route: null });
-      res.status(404).json({ error: 'no recent flight' });
-      return;
-    }
-    const dep = airports.get(flight.estDepartureAirport);
-    const arr = airports.get(flight.estArrivalAirport);
-    if (!dep || !arr) {
-      // We found a flight but can't resolve one or both airports —
-      // probably a private strip without an entry in OurAirports. Negative
-      // cache so we don't retry aggressively.
-      routeCache.set(icao24, { t: Date.now(), route: null });
-      res.status(404).json({
-        error: 'airport lookup failed',
-        depIcao: flight.estDepartureAirport,
-        arrIcao: flight.estArrivalAirport,
-      });
-      return;
-    }
-    const route = {
-      icao24,
-      callsign:      (flight.callsign || '').trim() || null,
-      dep, arr,
-      departureTime: flight.firstSeen || null,
-      arrivalTime:   flight.lastSeen || null,
-    };
-    routeCache.set(icao24, { t: Date.now(), route });
-    res.setHeader('Cache-Control', 'public, s-maxage=600');
-    res.status(200).json(route);
-  } catch (e) {
-    console.warn('[flight-route] failed:', e.message);
-    res.status(502).json({ error: 'upstream failed', detail: e.message });
+  // Run both upstream fetches in parallel but settle so one failure
+  // doesn't cascade. We can still report "airport DB unavailable" or
+  // "OpenSky unreachable" explicitly instead of a generic 502.
+  const [airportsSettle, flightSettle] = await Promise.allSettled([
+    loadAirports(),
+    fetchMostRecentFlight(icao24),
+  ]);
+  if (airportsSettle.status === 'rejected') {
+    console.warn('[flight-route] airports load failed:', airportsSettle.reason?.message);
+    res.status(502).json({ error: 'airport db unavailable', detail: String(airportsSettle.reason?.message || airportsSettle.reason) });
+    return;
   }
+  if (flightSettle.status === 'rejected') {
+    console.warn('[flight-route] opensky failed:', flightSettle.reason?.message);
+    res.status(502).json({ error: 'opensky unavailable', detail: String(flightSettle.reason?.message || flightSettle.reason) });
+    return;
+  }
+  const airports = airportsSettle.value;
+  const flight   = flightSettle.value;
+  if (!flight || !flight.estDepartureAirport || !flight.estArrivalAirport) {
+    routeCache.set(icao24, { t: Date.now(), route: null });
+    res.status(404).json({ error: 'no recent flight' });
+    return;
+  }
+  const dep = airports.get(flight.estDepartureAirport);
+  const arr = airports.get(flight.estArrivalAirport);
+  if (!dep || !arr) {
+    routeCache.set(icao24, { t: Date.now(), route: null });
+    res.status(404).json({
+      error: 'airport lookup failed',
+      depIcao: flight.estDepartureAirport,
+      arrIcao: flight.estArrivalAirport,
+    });
+    return;
+  }
+  const route = {
+    icao24,
+    callsign:      (flight.callsign || '').trim() || null,
+    dep, arr,
+    departureTime: flight.firstSeen || null,
+    arrivalTime:   flight.lastSeen || null,
+  };
+  routeCache.set(icao24, { t: Date.now(), route });
+  res.setHeader('Cache-Control', 'public, s-maxage=600');
+  res.status(200).json(route);
 }
