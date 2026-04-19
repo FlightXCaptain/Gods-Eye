@@ -118,10 +118,21 @@ async function fetchEONET() {
   // 30-day window covering both currently-active events and anything that
   // resolved in the last month. status=all includes closed events so the
   // time-slider can scrub through history.
-  const j = await safeFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=all&days=30&limit=1000');
+  //
+  // Tropical cyclones are fetched separately with a longer window because
+  // their multi-week tracks are the whole point of the storm-tracks overlay —
+  // a storm detected 40 days ago and still moving should show its full
+  // history. Severe-storm events are merged in and deduped by id.
+  const [j, jStorms] = await Promise.all([
+    safeFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=all&days=30&limit=1000'),
+    safeFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=all&days=180&limit=500&category=severeStorms'),
+  ]);
   if (!j?.events) return [];
+  const byId = new Map();
+  for (const e of j.events) byId.set(e.id, e);
+  for (const e of (jStorms?.events || [])) byId.set(e.id, e);
   const out = [];
-  for (const e of j.events) {
+  for (const e of byId.values()) {
     const last = e.geometry?.[e.geometry.length - 1]; if (!last) continue;
     let lon, lat;
     if (last.type === 'Point') [lon,lat] = last.coordinates;

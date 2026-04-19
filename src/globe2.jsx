@@ -1548,17 +1548,21 @@ function Globe({
 
       // EONET events — per-category iconography with LOD
       if (layers.events && data.events) {
+        // EONET category ids are camelCase (`severeStorms`, `wildfires`,
+        // `seaLakeIce`, etc.), so the match has to be case-insensitive.
+        // Previous lowercase `includes` silently missed every storm and
+        // fell through to the generic purple event icon.
         const catMeta = (cid) => {
-          cid = cid || '';
-          if (cid.includes('wildfire'))                          return { c:'#ef4444', fn:iconFire };
-          if (cid.includes('volcano'))                           return { c:'#f97316', fn:iconVolcano };
-          if (cid.includes('storm') || cid.includes('cyclone'))  return { c:'#38bdf8', fn:iconStorm };
-          if (cid.includes('ice') || cid.includes('snow'))       return { c:'#a5f3fc', fn:iconIce };
+          const c = (cid || '').toLowerCase();
+          if (c.includes('wildfire'))                     return { c:'#ef4444', fn:iconFire };
+          if (c.includes('volcano'))                      return { c:'#f97316', fn:iconVolcano };
+          if (c.includes('storm') || c.includes('cyclone')) return { c:'#38bdf8', fn:iconStorm };
+          if (c.includes('ice') || c.includes('snow'))    return { c:'#a5f3fc', fn:iconIce };
           return { c:'#a78bfa', fn:iconEvent };
         };
         const isStormCat = (cid) => {
-          cid = cid || '';
-          return cid.includes('storm') || cid.includes('cyclone');
+          const c = (cid || '').toLowerCase();
+          return c.includes('storm') || c.includes('cyclone');
         };
 
         // Storm tracks — draw the past-path polyline first so the current
