@@ -334,6 +334,28 @@ function Globe({
   // position forever. null when nothing is being tracked.
   const focusLiveCoordsRef = useRef(null);
 
+  // When the focused target is a ship, we load its 30-day IndexedDB
+  // history and stash the polyline here. The draw loop renders it on the
+  // overlay canvas with age-based alpha fade. Cleared when focus moves
+  // away. Null shape: { mmsi, positions: [{t, lon, lat}, ...] }.
+  const shipHistoryRef = useRef(null);
+  useEffect(() => {
+    if (focusTarget?.trackLayer !== 'ship' || !focusTarget.trackId) {
+      shipHistoryRef.current = null;
+      return;
+    }
+    if (typeof window.getShipHistory !== 'function') return;
+    const requestedMmsi = focusTarget.trackId;
+    let cancelled = false;
+    window.getShipHistory(requestedMmsi).then((h) => {
+      // Guard against a stale response — user may have focused a
+      // different ship while this was in flight.
+      if (cancelled || focusTarget?.trackId !== requestedMmsi) return;
+      shipHistoryRef.current = h;
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [focusTarget]);
+
   // Initialise / refresh the wind particle pool when size changes. Random
   // lon/lat and ages so the fade-in is staggered rather than synchronous.
   useEffect(() => {
@@ -1489,6 +1511,48 @@ function Globe({
       // Focus reticle — prefer the live-tracked position (updated each
       // frame for flights/ships/ISS) and fall back to the stored dblclick
       // coords for stationary targets like cities and quakes.
+      // Ship historical track — up to 30 days of accumulated positions for
+      // the currently-focused ship, drawn as a polyline with age-based
+      // alpha fade (older segments more transparent). We draw segments
+      // only where BOTH endpoints are visible on the current hemisphere;
+      // a great-circle split across the horizon would need densification
+      // to render cleanly, and the ~3-minute sample rate is dense enough
+      // that straight chords between visible samples read fine.
+      if (focusTarget?.trackLayer === 'ship' && shipHistoryRef.current?.positions?.length >= 2) {
+        const pos = shipHistoryRef.current.positions;
+        const now = Date.now();
+        const maxAge = 30 * 24 * 3600 * 1000;
+        octx.lineWidth = 1.3;
+        for (let i = 0; i < pos.length - 1; i++) {
+          const a = pos[i], b = pos[i + 1];
+          if (!visibleOn(projection, a.lon, a.lat)) continue;
+          if (!visibleOn(projection, b.lon, b.lat)) continue;
+          const pa = projection([a.lon, a.lat]);
+          const pb = projection([b.lon, b.lat]);
+          if (!pa || !pb) continue;
+          // Age the FROM point: the older the starting position, the more
+          // faded the outgoing segment.
+          const age = (now - a.t) / maxAge;
+          const alpha = Math.max(0.12, 0.85 * (1 - age));
+          octx.strokeStyle = `rgba(34, 211, 238, ${alpha.toFixed(3)})`;
+          octx.beginPath();
+          octx.moveTo(pa[0], pa[1]);
+          octx.lineTo(pb[0], pb[1]);
+          octx.stroke();
+        }
+        // Small dots at each recorded position so you can see where AIS
+        // pings actually happened (vs. the interpolated line segments).
+        octx.fillStyle = 'rgba(34, 211, 238, 0.75)';
+        for (const p of pos) {
+          if (!visibleOn(projection, p.lon, p.lat)) continue;
+          const pt = projection([p.lon, p.lat]);
+          if (!pt) continue;
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], 1, 0, Math.PI * 2);
+          octx.fill();
+        }
+      }
+
       const reticleCoords = focusLiveCoordsRef.current || focusTarget?.coords;
       if (reticleCoords && visibleOn(projection, reticleCoords[0], reticleCoords[1])) {
         const pt = projection(reticleCoords);

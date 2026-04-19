@@ -494,6 +494,7 @@ function Dossier({ item, onClose }) {
           <KV k="Course" v={item.cog != null ? `${Math.round(item.cog)}°` : '—'}/>
           {item.dest && <KV k="Destination" v={item.dest}/>}
           <KV k="Position" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
+          <ShipHistoryStats mmsi={item.mmsi}/>
         </>}
         {layer === 'quake' && <>
           <div className="text-lg">M{item.mag?.toFixed(1)} Earthquake</div>
@@ -553,6 +554,52 @@ function KV({ k, v }) {
     <div className="flex items-baseline gap-3">
       <span className="text-[10px] uppercase font-mono opacity-50 tracking-wider w-16 shrink-0">{k}</span>
       <span className="text-sm font-mono">{v}</span>
+    </div>
+  );
+}
+
+// Async-renders the IndexedDB history stats for a given MMSI. Shows up to
+// the last 30 days of accumulated positions collected while this browser
+// was running. We can't backfill history from before first observation —
+// no free AIS historical feed exists.
+function ShipHistoryStats({ mmsi }) {
+  const [h, setH] = useState(null);
+  useEffect(() => {
+    if (!mmsi || typeof window.getShipHistory !== 'function') return;
+    let cancel = false;
+    window.getShipHistory(mmsi).then((r) => { if (!cancel) setH(r); }).catch(() => {});
+    return () => { cancel = true; };
+  }, [mmsi]);
+
+  if (!h) return null;
+  if (!h.count || h.count < 2) {
+    return (
+      <div className="pt-1 text-[10px] font-mono opacity-50 uppercase tracking-wider">
+        No accumulated track yet · samples every 3 min while page is open
+      </div>
+    );
+  }
+  const days = Math.max(1, Math.ceil((h.lastSeen - h.firstSeen) / (24*3600*1000)));
+  // Rough chord-distance total. Samples are ≥ 3 min apart so straight
+  // chords undercount curved routes, but it's an honest sum of observed
+  // motion rather than an inflated great-circle sum.
+  let km = 0;
+  for (let i = 1; i < h.positions.length; i++) {
+    const a = h.positions[i - 1], b = h.positions[i];
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLon = (b.lon - a.lon) * Math.PI / 180;
+    const latM = ((a.lat + b.lat) / 2) * Math.PI / 180;
+    const dx = 6371 * dLon * Math.cos(latM);
+    const dy = 6371 * dLat;
+    km += Math.hypot(dx, dy);
+  }
+  const trackedSince = new Date(h.firstSeen);
+  return (
+    <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1">
+      <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Tracked history</div>
+      <KV k="Since" v={trackedSince.toISOString().slice(0, 10)}/>
+      <KV k="Samples" v={`${h.count} (${days}d)`}/>
+      <KV k="Distance" v={`~${km.toFixed(0)} km`}/>
     </div>
   );
 }
