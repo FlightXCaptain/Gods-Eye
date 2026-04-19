@@ -118,10 +118,21 @@ async function fetchEONET() {
   // 30-day window covering both currently-active events and anything that
   // resolved in the last month. status=all includes closed events so the
   // time-slider can scrub through history.
-  const j = await safeFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=all&days=30&limit=1000');
+  //
+  // Tropical cyclones are fetched separately with a longer window because
+  // their multi-week tracks are the whole point of the storm-tracks overlay —
+  // a storm detected 40 days ago and still moving should show its full
+  // history. Severe-storm events are merged in and deduped by id.
+  const [j, jStorms] = await Promise.all([
+    safeFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=all&days=30&limit=1000'),
+    safeFetch('https://eonet.gsfc.nasa.gov/api/v3/events?status=all&days=180&limit=500&category=severeStorms'),
+  ]);
   if (!j?.events) return [];
+  const byId = new Map();
+  for (const e of j.events) byId.set(e.id, e);
+  for (const e of (jStorms?.events || [])) byId.set(e.id, e);
   const out = [];
-  for (const e of j.events) {
+  for (const e of byId.values()) {
     const last = e.geometry?.[e.geometry.length - 1]; if (!last) continue;
     let lon, lat;
     if (last.type === 'Point') [lon,lat] = last.coordinates;
@@ -145,12 +156,23 @@ async function fetchEONET() {
     const first = e.geometry?.[0];
     const startMs = first?.date ? new Date(first.date).getTime() : timeMs;
     const closedMs = e.closed ? new Date(e.closed).getTime() : null;
+    // Preserve the full geometry as a track for events that have multiple
+    // Point samples (storms/cyclones are the main use case — EONET reports
+    // 6-hourly positions). Non-Point geometries (fire polygons) are skipped.
+    const track = [];
+    for (const g of e.geometry) {
+      if (g.type !== 'Point' || !g.coordinates) continue;
+      const t = g.date ? new Date(g.date).getTime() : NaN;
+      if (!isFinite(t)) continue;
+      track.push({ lon: g.coordinates[0], lat: g.coordinates[1], t });
+    }
     out.push({
       id: e.id, lon, lat, title: e.title,
       category: e.categories?.[0]?.title || 'Event',
       categoryId: e.categories?.[0]?.id || 'other',
       time: timeMs, startTime: startMs, closedTime: closedMs,
       link: e.link, kind:'eonet',
+      track: track.length >= 2 ? track : null,
     });
   }
   return out;
