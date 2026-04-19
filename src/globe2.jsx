@@ -356,6 +356,28 @@ function Globe({
     return () => { cancelled = true; };
   }, [focusTarget]);
 
+  // When the focused target is a flight, fetch its most recent
+  // OpenSky-logged dep→arr route and stash it here. The draw loop paints
+  // a dashed great-circle from dep to arr plus dots at each airport;
+  // meanwhile the live ADS-B stream keeps the plane icon moving on top
+  // so the user can see it traverse the simulated path. null when not
+  // focused on a flight or when the aircraft has no recent logged flight.
+  const flightRouteRef = useRef(null);
+  useEffect(() => {
+    if (focusTarget?.trackLayer !== 'flight' || !focusTarget.trackId) {
+      flightRouteRef.current = null;
+      return;
+    }
+    if (typeof window.getFlightRoute !== 'function') return;
+    const reqIcao = focusTarget.trackId;
+    let cancelled = false;
+    window.getFlightRoute(reqIcao).then((route) => {
+      if (cancelled || focusTarget?.trackId !== reqIcao) return;
+      flightRouteRef.current = route || null;
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [focusTarget]);
+
   // Initialise / refresh the wind particle pool when size changes. Random
   // lon/lat and ages so the fade-in is staggered rather than synchronous.
   useEffect(() => {
@@ -1595,6 +1617,61 @@ function Globe({
       // Focus reticle — prefer the live-tracked position (updated each
       // frame for flights/ships/ISS) and fall back to the stored dblclick
       // coords for stationary targets like cities and quakes.
+      // Flight route (great-circle from dep → arr). Drawn as a dashed line
+      // so the live plane icon overlaid from the main flight loop reads as
+      // "here on the planned path" rather than competing with a solid
+      // track. Segments are discretised via d3.geoInterpolate so the line
+      // curves correctly on the orthographic projection; segments straddling
+      // the horizon are elided by the visibleOn check.
+      if (focusTarget?.trackLayer === 'flight' && flightRouteRef.current?.dep && flightRouteRef.current?.arr) {
+        const route = flightRouteRef.current;
+        const depLL = [route.dep.lon, route.dep.lat];
+        const arrLL = [route.arr.lon, route.arr.lat];
+        const interp = d3.geoInterpolate(depLL, arrLL);
+        const segments = 120;
+        octx.save();
+        octx.setLineDash([5, 4]);
+        octx.strokeStyle = 'rgba(125, 211, 252, 0.55)';
+        octx.lineWidth = 1.3;
+        let pen = null;   // last screen point we drew to ('pen up' when off-globe)
+        for (let i = 0; i <= segments; i++) {
+          const t = i / segments;
+          const [lon, lat] = interp(t);
+          if (!visibleOn(projection, lon, lat)) { pen = null; continue; }
+          const pt = projection([lon, lat]);
+          if (!pt) { pen = null; continue; }
+          if (pen) {
+            octx.beginPath();
+            octx.moveTo(pen[0], pen[1]);
+            octx.lineTo(pt[0], pt[1]);
+            octx.stroke();
+          }
+          pen = pt;
+        }
+        octx.setLineDash([]);
+        // Airport markers: small filled dot + IATA/ICAO label offset above.
+        octx.font = 'bold 10px "Geist Mono", ui-monospace, monospace';
+        octx.textAlign = 'center';
+        octx.textBaseline = 'alphabetic';
+        for (const a of [route.dep, route.arr]) {
+          if (!visibleOn(projection, a.lon, a.lat)) continue;
+          const pt = projection([a.lon, a.lat]);
+          if (!pt) continue;
+          octx.fillStyle = 'rgba(125, 211, 252, 0.95)';
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], 3, 0, Math.PI * 2);
+          octx.fill();
+          // Label background for readability
+          const label = a.iata || a.icao;
+          const tw = octx.measureText(label).width;
+          octx.fillStyle = isDark ? 'rgba(10,10,15,0.7)' : 'rgba(255,255,255,0.8)';
+          octx.fillRect(pt[0] - tw/2 - 3, pt[1] - 18, tw + 6, 13);
+          octx.fillStyle = 'rgba(125, 211, 252, 1)';
+          octx.fillText(label, pt[0], pt[1] - 8);
+        }
+        octx.restore();
+      }
+
       // Ship historical track — up to 30 days of accumulated positions for
       // the currently-focused ship, drawn as a polyline with age-based
       // alpha fade (older segments more transparent). We draw segments
