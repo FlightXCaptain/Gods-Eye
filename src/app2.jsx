@@ -504,6 +504,22 @@ function Dossier({ item, onClose }) {
           <KV k="Speed" v={item.sog != null ? `${item.sog.toFixed(1)} kn` : '—'}/>
           <KV k="Course" v={item.cog != null ? `${Math.round(item.cog)}°` : '—'}/>
           {item.dest && <KV k="Destination" v={item.dest}/>}
+          {item.dest && typeof window.resolvePort === 'function' && (() => {
+            const p = window.resolvePort(item.dest);
+            if (!p) return null;
+            // Great-circle km from current position to the resolved port.
+            const toRad = (d) => d * Math.PI / 180;
+            const dLat = toRad(p.lat - item.lat);
+            const dLon = toRad(p.lon - item.lon);
+            const a = Math.sin(dLat/2)**2 + Math.cos(toRad(item.lat)) * Math.cos(toRad(p.lat)) * Math.sin(dLon/2)**2;
+            const km = Math.round(2 * 6371 * Math.asin(Math.sqrt(a)));
+            return (
+              <>
+                <KV k="Port" v={`${p.name} (${p.alias})`}/>
+                <KV k="Distance" v={`~${km.toLocaleString()} km`}/>
+              </>
+            );
+          })()}
           <KV k="Position" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
           <ShipHistoryStats mmsi={item.mmsi}/>
         </>}
