@@ -510,7 +510,7 @@ function Stat({ label, value, accent, title }) {
   );
 }
 
-function StatBar({ data, kp }) {
+function StatBar({ data, kp, layers }) {
   const flightCount  = data.flights?.length || 0;
   const shipCount    = data.ships?.length || 0;
   const quakeCount   = data.quakes?.length || 0;
@@ -522,9 +522,15 @@ function StatBar({ data, kp }) {
   const reactorCount = (data.reactors || []).filter(r => (r.status || '').toLowerCase().includes('operational')).length;
   const plantCount   = data.plants?.length || 0;
   const cableCount   = data.cables?.length || 0;
-  // Stats scroll horizontally on overflow; new layers only appear in the
-  // bar when their data is actually loaded (cables/reactors/plants are
-  // off by default and only relevant to users who flip them on).
+  // Gating rules so the bar doesn't balloon to 11 entries:
+  //   • Core 5 + Kp always shown.
+  //   • Cyclones + ongoing-outages appear whenever there's >0 because
+  //     they're "world state" counters that matter even if the layer
+  //     is off on this client.
+  //   • Inventory-style layers (news / reactors / plants / cables) are
+  //     only shown when the user has actually toggled the layer on —
+  //     otherwise their data is loaded but nothing's visible on the
+  //     globe, so the count is just noise.
   const items = [
     { label: 'Flights',      short: 'Flights', shortMobile: 'FLT', val: flightCount.toLocaleString(), glyph: 'flight', color: '#7dd3fc', title: 'Aircraft currently airborne (ADS-B via airplanes.live)' },
     { label: 'Ships',        short: 'Ships',   shortMobile: 'SHP', val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
@@ -538,16 +544,16 @@ function StatBar({ data, kp }) {
   if (outageCount > 0) items.push(
     { label: 'Internet outages', short: 'Outages', shortMobile: 'OUT', val: outageCount, glyph: 'bolt',  color: '#ef4444', title: 'Currently-ongoing internet outages worldwide (Cloudflare Radar)' }
   );
-  if (newsCount > 0) items.push(
+  if (layers?.news && newsCount > 0) items.push(
     { label: 'News hotspots', short: 'News', shortMobile: 'NWS', val: newsCount.toLocaleString(), glyph: 'wiki', color: '#a78bfa', title: 'Geocoded events in the latest GDELT 15-minute window' }
   );
-  if (reactorCount > 0) items.push(
+  if (layers?.reactors && reactorCount > 0) items.push(
     { label: 'Reactors',  short: 'Reactors', shortMobile: 'NUC', val: reactorCount, glyph: 'radiation', color: '#22c55e', title: 'Operational nuclear reactors (GeoNuclearData)' }
   );
-  if (plantCount > 0) items.push(
+  if (layers?.plants && plantCount > 0) items.push(
     { label: 'Power plants ≥100 MW', short: 'Plants', shortMobile: 'PWR', val: plantCount.toLocaleString(), glyph: 'bolt', color: '#f59e0b', title: 'Utility-scale power plants ≥100 MW (WRI GPPD)' }
   );
-  if (cableCount > 0) items.push(
+  if (layers?.cables && cableCount > 0) items.push(
     { label: 'Submarine cables', short: 'Cables', shortMobile: 'CBL', val: cableCount, glyph: 'aurora', color: '#22d3ee', title: 'Submarine communications cables (TeleGeography)' }
   );
   items.push(
@@ -1640,12 +1646,12 @@ function App() {
             <ThemeToggle theme={theme} onChange={setTheme}/>
           </div>
           <div className="min-w-0 max-w-full overflow-hidden hidden sm:block">
-            <StatBar data={filteredData} kp={kp}/>
+            <StatBar data={filteredData} kp={kp} layers={layers}/>
           </div>
         </div>
         {/* Phone-only stat pill on its own row */}
         <div className="sm:hidden pointer-events-auto order-2 min-w-0 max-w-full overflow-hidden">
-          <StatBar data={filteredData} kp={kp}/>
+          <StatBar data={filteredData} kp={kp} layers={layers}/>
         </div>
         {/* Desktop action cluster (hidden on mobile — duplicated above) */}
         <div className="hidden sm:flex items-center gap-2 pointer-events-auto order-3">
