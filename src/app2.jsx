@@ -313,6 +313,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['sats','Satellites', 'sat',     '#d946ef'],
     ['iss','ISS',         'iss',     '#f43f5e'],
     ['quakes','Seismic',  'quake',   '#fb923c'],
+    ['cyclones','Tropical cyclones', 'storm', '#f97316'],
     ['events','Natural events', 'fire', '#ef4444'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
@@ -507,6 +508,7 @@ function Dossier({ item, onClose }) {
               : layer === 'ship' ? 'Vessel'
               : layer === 'quake' ? 'Seismic'
               : layer === 'event' ? 'Natural'
+              : layer === 'cyclone' ? 'Cyclone'
               : layer === 'fire' ? 'Thermal'
               : layer === 'sat' ? 'Satellite'
               : layer === 'city' ? 'City'
@@ -588,6 +590,18 @@ function Dossier({ item, onClose }) {
           <KV k="Type" v={item.category}/>
           <KV k="Updated" v={fmtTime(item.time)}/>
           {item.link && <a href={item.link} target="_blank" className="text-xs text-accent-500 underline">NASA EONET →</a>}
+        </>}
+        {layer === 'cyclone' && <>
+          <div className="text-lg">{item.classification ? `${item.classification} ` : ''}{item.name}</div>
+          <div className="text-sm opacity-70">NHC{item.binNumber ? ` · ${item.binNumber}` : ''}</div>
+          {item.intensityKt != null && <KV k="Wind" v={`${Math.round(item.intensityKt)} kt`}/>}
+          {item.pressureMb != null && <KV k="Pressure" v={`${Math.round(item.pressureMb)} mb`}/>}
+          {item.movementDir && item.movementSpeedKt != null && (
+            <KV k="Moving" v={`${item.movementDir} @ ${Math.round(item.movementSpeedKt)} kt`}/>
+          )}
+          <KV k="Position" v={`${item.lat.toFixed(2)}°, ${item.lon.toFixed(2)}°`}/>
+          <KV k="Updated" v={fmtTime(item.time)}/>
+          {item.advisoryUrl && <a href={item.advisoryUrl} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">NHC advisory →</a>}
         </>}
         {layer === 'fire' && <>
           <div className="text-lg">Thermal hotspot</div>
@@ -941,7 +955,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
@@ -1016,6 +1030,7 @@ function App() {
         case 'lake':    return it.name || 'Lake';
         case 'quake':   return `M${typeof it.mag === 'number' ? it.mag.toFixed(1) : '?'} · ${it.place || 'Earthquake'}`;
         case 'event':   return it.title || 'Event';
+        case 'cyclone': return (it.classification ? `${it.classification} ` : '') + (it.name || 'Cyclone');
         default:        return 'Target';
       }
     };
@@ -1049,7 +1064,7 @@ function App() {
   }, []);
 
   // Data
-  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], iss:null, sats:[], satTLEs:[], ships:[] });
+  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], cyclones:[], iss:null, sats:[], satTLEs:[], ships:[] });
   const [kp, setKp] = useState(null);
   const [ticker, setTicker] = useState([]);
 
@@ -1117,11 +1132,11 @@ function App() {
   useEffect(() => {
     let alive = true;
     const loadAll = async () => {
-      const [q,e,k,a,t] = await Promise.all([
-        fetchQuakes(), fetchEONET(), fetchKp(), fetchAurora(), fetchTsunamis(),
+      const [q,e,k,a,t,cy] = await Promise.all([
+        fetchQuakes(), fetchEONET(), fetchKp(), fetchAurora(), fetchTsunamis(), fetchNHC(),
       ]);
       if (!alive) return;
-      setData(d => ({...d, quakes:q, events:e, aurora:a, tsunamis:t }));
+      setData(d => ({...d, quakes:q, events:e, aurora:a, tsunamis:t, cyclones:cy }));
       setKp(k);
       // Push to live feed
       pushFeed((q||[]).slice(0,15).map(qk => ({
@@ -1136,6 +1151,13 @@ function App() {
         title: ev.title, sub: ev.category,
         _item: { ...ev, _layer:'event' },
         coords: [ev.lon, ev.lat],
+      })));
+      pushFeed((cy||[]).map(c => ({
+        key: 'cy:'+c.id, layer:'cyclone', time: c.time || Date.now(),
+        title: `${c.classification || 'Cyclone'} ${c.name}`,
+        sub: c.intensityKt ? `${Math.round(c.intensityKt)} kt${c.pressureMb ? ` · ${Math.round(c.pressureMb)} mb` : ''}` : (c.binNumber || ''),
+        _item: { ...c, _layer:'cyclone' },
+        coords: [c.lon, c.lat],
       })));
       if (k) pushFeed([{
         key: 'kp:'+k.time, layer:'kp', time: new Date(k.time).getTime() || Date.now(),

@@ -178,6 +178,93 @@ async function fetchEONET() {
   return out;
 }
 
+// Active tropical cyclones from the US National Hurricane Center. Covers
+// Atlantic (AT), Eastern Pacific (EP), and Central Pacific (CP) basins only
+// — Western Pacific typhoons are a JTWC responsibility and there is no
+// public JSON feed for them. A user looking for a NW Pacific typhoon will
+// still see it in the EONET layer (separately fetched, coarser update
+// cadence) but without a forecast cone.
+//
+// Two feeds combined:
+//   1. CurrentStorms.json — compact list of currently-active storms with id,
+//      name, intensity, position, binNumber ("AT1".."CP5" — a storm's active
+//      slot this season). Refreshed by NHC on every advisory (~6-hourly).
+//   2. NOAA tropical MapServer — per-slot Forecast Cone (polygon) and
+//      Forecast Track (polyline) layers. The 15 slots are laid out
+//      contiguously: slot N uses layer ids {points: 6+26N, track: 7+26N,
+//      cone: 8+26N}. AT1..AT5 → slots 0..4, EP1..EP5 → 5..9, CP1..CP5 →
+//      10..14. We resolve each storm's slot from its binNumber and only
+//      query layers for currently-active slots, so the common
+//      no-storms-active case makes exactly ONE request (CurrentStorms.json)
+//      and finds no work to do.
+async function fetchNHC() {
+  const c = await safeFetch('https://www.nhc.noaa.gov/CurrentStorms.json');
+  const active = Array.isArray(c?.activeStorms) ? c.activeStorms : [];
+  if (!active.length) return [];
+
+  const MAPSERVER = 'https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_tropical_weather/MapServer';
+  const slotIndex = (binNumber) => {
+    if (typeof binNumber !== 'string' || binNumber.length < 3) return -1;
+    const basin = binNumber.slice(0, 2).toUpperCase();
+    const n = parseInt(binNumber.slice(2), 10);
+    if (!isFinite(n) || n < 1 || n > 5) return -1;
+    const basinOffset = basin === 'AT' ? 0 : basin === 'EP' ? 5 : basin === 'CP' ? 10 : -1;
+    if (basinOffset < 0) return -1;
+    return basinOffset + (n - 1);
+  };
+  const queryLayerGeo = async (layerId) => {
+    const j = await safeFetch(`${MAPSERVER}/${layerId}/query?where=1%3D1&outFields=*&f=geojson&outSR=4326`);
+    return Array.isArray(j?.features) ? j.features : [];
+  };
+
+  const out = [];
+  for (const s of active) {
+    // CurrentStorms uses strings like "26.2N"/"83.5W" but also numeric
+    // versions on modern feeds. Prefer numeric; parse the directional string
+    // as a fallback.
+    const parseCoord = (str) => {
+      if (typeof str !== 'string') return NaN;
+      const m = str.match(/^\s*([\d.]+)\s*([NnSsEeWw])?\s*$/);
+      if (!m) return NaN;
+      const v = parseFloat(m[1]);
+      const hem = (m[2] || '').toUpperCase();
+      return hem === 'S' || hem === 'W' ? -v : v;
+    };
+    const lonRaw = s.longitudeNumeric ?? s.longitude;
+    const latRaw = s.latitudeNumeric ?? s.latitude;
+    const lon = typeof lonRaw === 'number' ? lonRaw : parseCoord(lonRaw);
+    const lat = typeof latRaw === 'number' ? latRaw : parseCoord(latRaw);
+    if (!isFinite(lon) || !isFinite(lat)) continue;
+
+    const slot = slotIndex(s.binNumber);
+    const base = slot >= 0 ? 6 + 26 * slot : -1;
+    const [coneFeats, trackFeats] = base >= 0
+      ? await Promise.all([queryLayerGeo(base + 2), queryLayerGeo(base + 1)])
+      : [[], []];
+
+    out.push({
+      id: s.id || `${s.binNumber}-${s.name}`,
+      name: s.name || 'Unnamed',
+      binNumber: s.binNumber || null,
+      classification: s.classification || '',       // TD/TS/HU/STS/PTC etc.
+      intensityKt: parseFloat(s.intensity) || 0,    // sustained wind, knots
+      pressureMb: parseFloat(s.pressure) || null,   // central pressure, mb
+      movementDir: s.movementDir || null,
+      movementSpeedKt: parseFloat(s.movementSpeed) || null,
+      lon, lat,
+      time: s.lastUpdate ? new Date(s.lastUpdate).getTime() : Date.now(),
+      // cone/track stay as raw GeoJSON geometries (Polygon/MultiPolygon /
+      // LineString/MultiLineString) so the renderer can feed them straight
+      // to d3.geoPath on the overlay context.
+      cone: coneFeats[0]?.geometry || null,
+      track: trackFeats[0]?.geometry || null,
+      advisoryUrl: s.publicAdvisory?.url || s.forecastDiscussion?.url || null,
+      kind: 'cyclone',
+    });
+  }
+  return out;
+}
+
 async function fetchKp() {
   const j = await safeFetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json');
   if (!Array.isArray(j)) return null;
@@ -356,7 +443,7 @@ function propagateSats(tleList, when) {
 }
 
 Object.assign(window, {
-  fetchQuakes, fetchISS, fetchFlights, fetchEONET, fetchKp, fetchAurora,
+  fetchQuakes, fetchISS, fetchFlights, fetchEONET, fetchNHC, fetchKp, fetchAurora,
   fetchTsunamis, fetchSatellites, propagateSats, loadSatcat,
   subscribeWikiEdits, COUNTRY_POINTS,
 });
