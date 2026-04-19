@@ -408,7 +408,7 @@ function StatBar({ data, kp }) {
     { label: 'Ships',        short: 'Ships',   shortMobile: 'SHP', val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
     { label: 'Satellites',   short: 'Sats',    shortMobile: 'SAT', val: satCount.toLocaleString(),    glyph: 'sat',    color: '#d946ef', title: 'Orbital objects propagated from CelesTrak TLEs' },
     { label: 'Earthquakes',  short: 'Quakes',  shortMobile: 'SEI', val: quakeCount,                   glyph: 'quake',  color: '#fb923c', title: 'Seismic events in the last 24h (USGS)' },
-    { label: 'Natural events', short: 'Nature',shortMobile: 'NAT', val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Storms, wildfires, volcanoes, ice with updates in the last 24h (NASA EONET)' },
+    { label: 'Natural events', short: 'Nature',shortMobile: 'NAT', val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Currently active storms, wildfires, volcanoes, ice (NASA EONET, status=open)' },
     { label: 'Geomagnetic',  short: 'Kp',      shortMobile: 'Kp',  val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
   ];
   return (
@@ -1187,24 +1187,32 @@ function App() {
   }, []);
   const [tweaks, setTweaks] = useState(false);
 
-  // Point-event layers (quakes, EONET) share the same 24-hour window
-  // ending at the cursor. For events, this means only items whose MOST
-  // RECENT geometry update was in the last 24 h — a cyclone that hasn't
-  // moved in 22 days stays hidden even though EONET still lists it.
-  // This is tighter than the fetch's 30-day horizon on purpose: what
-  // users want to see is "what's happening now," not "what has ever
-  // existed in the last month."
+  // Filter rules per layer:
+  //   quakes: one-time events — show detections in the 24 h ending at
+  //           the cursor. Same rule at live and during scrub.
+  //   events: show EONET events that were ACTIVE at the cursor time.
+  //           Active means "had started AND hadn't been marked closed"
+  //           — lifecycle overlap, not geometry-update recency. This
+  //           sidesteps the NASA-updates-cadence problem where a typhoon
+  //           whose track was last drawn 2 days ago is still obviously
+  //           a current event that users expect to see. Scrubbing back
+  //           in time shows events active at that past moment.
   const filteredData = useMemo(() => {
     const cutoff = nowCursor;
-    const WINDOW = 24 * 3600 * 1000;
+    const QUAKE_WINDOW = 24 * 3600 * 1000;
     return {
       ...data,
       quakes: (data.quakes || []).filter(q =>
-        q.time <= cutoff && q.time >= cutoff - WINDOW && (q.mag || 0) >= seismicMin
+        q.time <= cutoff && q.time >= cutoff - QUAKE_WINDOW && (q.mag || 0) >= seismicMin
       ),
-      events: (data.events || []).filter(e =>
-        e.time <= cutoff && e.time >= cutoff - WINDOW
-      ),
+      events: (data.events || []).filter(e => {
+        const start = e.startTime || e.time;
+        if (start > cutoff) return false;
+        // closedTime === null means "still open"; any closed-before-cursor
+        // means the event was over by the cursor moment.
+        if (e.closedTime != null && e.closedTime < cutoff) return false;
+        return true;
+      }),
     };
   }, [data, nowCursor, seismicMin]);
 
