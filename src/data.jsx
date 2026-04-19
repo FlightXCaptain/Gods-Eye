@@ -305,18 +305,18 @@ async function fetchInternetOutages() {
   return out;
 }
 
-// Submarine communications cables from TeleGeography's public GeoJSON. Each
-// feature is a single cable's route polyline plus properties (id, name,
-// assigned display color). Stable ~700 KB feed, CORS-open, so client can
-// pull it directly without a proxy.
+// Submarine communications cables — goes through our /api/cables proxy
+// because TeleGeography's public endpoint doesn't send CORS headers, so a
+// direct browser fetch fails. The proxy trims each feature to the four
+// fields the UI uses.
 async function fetchSubmarineCables() {
-  const j = await safeFetch('https://www.submarinecablemap.com/api/v3/cable/cable-geo.json');
-  if (!j?.features) return [];
-  return j.features.map(f => ({
-    id: f.properties?.id || f.properties?.feature_id || f.properties?.name,
-    name: f.properties?.name || 'Unnamed cable',
-    color: f.properties?.color || '#22d3ee',
-    geometry: f.geometry, // LineString or MultiLineString, passed to d3.geoPath
+  const j = await safeFetch('/api/cables');
+  if (!Array.isArray(j)) return [];
+  return j.map(f => ({
+    id: f.id || f.name,
+    name: f.name || 'Unnamed cable',
+    color: f.color || '#22d3ee',
+    geometry: f.geometry, // LineString / MultiLineString — passed to d3.geoPath
     kind: 'cable',
   }));
 }
