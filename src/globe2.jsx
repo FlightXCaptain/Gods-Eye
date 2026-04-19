@@ -1493,22 +1493,19 @@ function Globe({
       if (reticleCoords && visibleOn(projection, reticleCoords[0], reticleCoords[1])) {
         const pt = projection(reticleCoords);
         if (pt) {
-          // Minimal crosshair: four short cardinal ticks + a small centre
-          // dot. Deliberately smaller than the marker so you can see what
-          // you're tracking without the reticle swallowing it.
+          // Minimal crosshair: four short cardinal ticks with an empty
+          // centre so the tracked marker is never obscured. The inner
+          // offset matches the largest marker size (~6 px) so small
+          // targets (quakes, events) still sit cleanly inside the gap.
           octx.strokeStyle = '#f43f5e';
-          octx.fillStyle   = '#f43f5e';
           octx.lineWidth   = 1.2;
-          const inner = 6, outer = 12;
+          const inner = 8, outer = 14;
           octx.beginPath();
           octx.moveTo(pt[0] - outer, pt[1]); octx.lineTo(pt[0] - inner, pt[1]);
           octx.moveTo(pt[0] + inner, pt[1]); octx.lineTo(pt[0] + outer, pt[1]);
           octx.moveTo(pt[0], pt[1] - outer); octx.lineTo(pt[0], pt[1] - inner);
           octx.moveTo(pt[0], pt[1] + inner); octx.lineTo(pt[0], pt[1] + outer);
           octx.stroke();
-          octx.beginPath();
-          octx.arc(pt[0], pt[1], 1.5, 0, Math.PI*2);
-          octx.fill();
         }
       }
 
