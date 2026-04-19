@@ -347,9 +347,9 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={()=>setOpen(false)} />
-          <div className="absolute z-50 top-12 right-0 w-60 glass-strong rounded-2xl p-3">
-            <div className="text-[10px] uppercase font-mono opacity-50 mb-2 tracking-wider">Layers</div>
-            <div className="space-y-0.5">
+          <div className="absolute z-50 top-12 right-0 w-60 max-h-[70vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
+            <div className="text-[10px] uppercase font-mono opacity-50 mb-2 tracking-wider shrink-0">Layers</div>
+            <div className="space-y-0.5 overflow-y-auto scroll flex-1 -mr-1 pr-1">
               {items.map(([k,label,glyph,col])=>(
                 <React.Fragment key={k}>
                   <label className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer">
@@ -1645,11 +1645,16 @@ function App() {
             </button>
             <ThemeToggle theme={theme} onChange={setTheme}/>
           </div>
-          <div className="min-w-0 max-w-full overflow-hidden hidden sm:block">
+          {/* Desktop stat pill. Explicit width cap keeps the bar from
+              growing into (or past) the right-side action cluster when
+              the user toggles several optional layers on. The inner
+              pill already has overflow-x-auto + tk-mask so extra
+              entries fade and scroll horizontally inside the cap. */}
+          <div className="min-w-0 max-w-[min(55vw,720px)] overflow-hidden hidden sm:block">
             <StatBar data={filteredData} kp={kp} layers={layers}/>
           </div>
         </div>
-        {/* Phone-only stat pill on its own row */}
+        {/* Phone stat pill — full row width, same fade + scroll behaviour. */}
         <div className="sm:hidden pointer-events-auto order-2 min-w-0 max-w-full overflow-hidden">
           <StatBar data={filteredData} kp={kp} layers={layers}/>
         </div>
