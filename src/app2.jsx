@@ -441,44 +441,10 @@ function StatBar({ data, kp }) {
   );
 }
 
-function Dossier({ item, onClose, onFocus }) {
+function Dossier({ item, onClose }) {
   if (!item) return null;
   const layer = item._layer || item.kind;
   const hasCoords = typeof item.lon === 'number' && typeof item.lat === 'number';
-  // Per-layer zoom presets — how close to zoom the globe when "Zoom to" is
-  // clicked. Fast-moving or wide-scope objects zoom less so the target stays
-  // on-screen; stationary point-of-interest items zoom closer.
-  const zoomByLayer = {
-    iss: 1.6, sat: 1.6, country: 1.8,
-    event: 2.5, lake: 2.5, quake: 3,
-    flight: 3, city: 3.5, ship: 4,
-    camera: 4,
-  };
-  const focusLabel = (() => {
-    switch (layer) {
-      case 'iss':     return item.name || 'ISS · ZARYA';
-      case 'sat':     return item.name || 'Satellite';
-      case 'flight':  return item.callsign || item.reg || 'Aircraft';
-      case 'ship':    return item.name || `MMSI ${item.mmsi}`;
-      case 'city':    return item.name || 'City';
-      case 'country': return item.name || 'Country';
-      case 'lake':    return item.name || 'Lake';
-      case 'quake':   return `M${typeof item.mag === 'number' ? item.mag.toFixed(1) : '?'} · ${item.place || 'Earthquake'}`;
-      case 'event':   return item.title || 'Event';
-      case 'camera':  return item.title || 'Live camera';
-      default:        return 'Target';
-    }
-  })();
-  const canFocus = hasCoords && typeof onFocus === 'function';
-  const handleFocus = () => {
-    if (!canFocus) return;
-    onFocus({
-      type: layer,
-      label: focusLabel,
-      coords: [item.lon, item.lat],
-      zoom: zoomByLayer[layer] || 2.5,
-    });
-  };
   return (
     <div className="glass-strong rounded-2xl w-[min(320px,calc(100vw-24px))] max-h-[calc(100vh-8rem)] overflow-hidden flex flex-col">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-black/5 dark:border-white/5">
@@ -638,19 +604,9 @@ function Dossier({ item, onClose, onFocus }) {
             )}
           </div>
         </>}
-        {canFocus && (
-          <div className="pt-1">
-            <button
-              type="button"
-              onClick={handleFocus}
-              title="Rotate globe and zoom in"
-              className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition inline-flex items-center gap-1.5"
-            >
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/><path d="M11 8v6M8 11h6"/>
-              </svg>
-              Zoom to
-            </button>
+        {hasCoords && (
+          <div className="pt-1 text-[10px] font-mono opacity-50 uppercase tracking-wider">
+            Double-click the marker to zoom &amp; track →
           </div>
         )}
       </div>
@@ -1196,6 +1152,50 @@ function App() {
           data={filteredData}
           nowCursor={nowCursor}
           onPickMarker={setPicked}
+          onFocusItem={(hit) => {
+            // Double-clicking a marker zooms in and (for moving objects)
+            // keeps the globe centred on it. Per-layer zoom presets — wide
+            // for fast/broad targets (ISS, country), close for stationary
+            // POIs (ship, camera). The trackId / trackLayer fields let the
+            // Globe tick loop re-resolve the object's live position every
+            // frame.
+            const layer = hit._layer;
+            const zoomByLayer = {
+              iss: 1.6, sat: 1.6, country: 1.8,
+              event: 2.5, lake: 2.5, quake: 3,
+              flight: 3, city: 3.5, ship: 4, camera: 4,
+            };
+            const labelFor = (it, l) => {
+              switch (l) {
+                case 'iss':     return it.name || 'ISS · ZARYA';
+                case 'sat':     return it.name || 'Satellite';
+                case 'flight':  return it.callsign || it.reg || 'Aircraft';
+                case 'ship':    return it.name || `MMSI ${it.mmsi}`;
+                case 'city':    return it.name || 'City';
+                case 'country': return it.name || 'Country';
+                case 'lake':    return it.name || 'Lake';
+                case 'quake':   return `M${typeof it.mag === 'number' ? it.mag.toFixed(1) : '?'} · ${it.place || 'Earthquake'}`;
+                case 'event':   return it.title || 'Event';
+                case 'camera':  return it.title || 'Live camera';
+                default:        return 'Target';
+              }
+            };
+            const trackKey = layer === 'flight' ? hit.id
+              : layer === 'ship' ? hit.mmsi
+              : layer === 'sat'  ? (hit.norad || hit.name)
+              : layer === 'iss'  ? 'iss'
+              : null;
+            setFocusTarget({
+              type: layer,
+              label: labelFor(hit, layer),
+              coords: [hit.lon, hit.lat],
+              zoom: zoomByLayer[layer] || 2.5,
+              trackId: trackKey,         // null for stationary targets
+              trackLayer: layer,
+            });
+            // Surface the dossier as well — useful metadata to read while tracking.
+            setPicked(hit);
+          }}
           focusTarget={focusTarget}
           theme={theme}
           animationIntensity={animIntensity}
@@ -1260,11 +1260,7 @@ function App() {
       {/* Dossier */}
       {picked && (
         <div className="absolute top-20 right-4 z-20 pointer-events-auto animate-fade-in">
-          <Dossier
-            item={picked}
-            onClose={()=>setPicked(null)}
-            onFocus={(target)=>setFocusTarget(target)}
-          />
+          <Dossier item={picked} onClose={()=>setPicked(null)}/>
         </div>
       )}
 
