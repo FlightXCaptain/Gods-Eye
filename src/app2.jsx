@@ -339,14 +339,32 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['daynight','Day / night shade', 'moon',  '#94a3b8'],
     ['tsunamis','Tsunami archive', 'tsunami', '#22d3ee'],
   ];
+  // Dismiss on outside click/tap via a document listener rather than a
+  // fullscreen backdrop div. The backdrop was intercepting drag/pinch
+  // on the globe behind it, making the map un-interactive while the
+  // popover was open. A document listener scoped to outside-the-root
+  // keeps the popover dismissible on tap outside without eating the
+  // scroll/pan gestures that land on the globe.
+  const rootRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
+  }, [open]);
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <IconBtn onClick={()=>setOpen(o=>!o)} active={open} title="Layers">
         <Icon name="layers" />
       </IconBtn>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={()=>setOpen(false)} />
           <div className="absolute z-50 top-12 right-0 w-60 max-h-[70vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
             <div className="text-[10px] uppercase font-mono opacity-50 mb-2 tracking-wider shrink-0">Layers</div>
             <div className="space-y-0.5 overflow-y-auto scroll flex-1 -mr-1 pr-1">
@@ -494,7 +512,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
             )}
 
           </div>
-        </>
       )}
     </div>
   );

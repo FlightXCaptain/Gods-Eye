@@ -26,6 +26,12 @@ let ws = null;
 let reconnectTimer = null;
 let reconnectDelay = 5000;
 const RECONNECT_CAP = 5 * 60 * 1000;
+// Diagnostic counters — logged periodically so we can see in runtime logs
+// whether the Blitzortung WS is actually producing strikes.
+let msgsSinceLog = 0;
+let strikesSinceLog = 0;
+let lastLogTs = 0;
+let statsTimer = null;
 
 // ─── Blitzortung LZW-style decoder ─────────────────────────────────────
 //
@@ -76,9 +82,24 @@ function connectUpstream() {
   ws.on('open', () => {
     reconnectDelay = 5000;
     ws.send(JSON.stringify({ a: 111 }));
+    console.log('[lightning] upstream OPEN, subscribed {a:111}');
+    // Periodic stats so we can see in runtime logs whether strikes are
+    // flowing through. Low-overhead — one log line per minute at most.
+    if (statsTimer) clearInterval(statsTimer);
+    statsTimer = setInterval(() => {
+      if (msgsSinceLog || strikesSinceLog) {
+        console.log(`[lightning] 60s: ${msgsSinceLog} msgs, ${strikesSinceLog} strikes, ${SUBSCRIBERS.size} subs`);
+      } else {
+        console.warn('[lightning] 60s: NO messages from upstream');
+      }
+      msgsSinceLog = 0;
+      strikesSinceLog = 0;
+    }, 60 * 1000);
+    statsTimer.unref?.();
   });
 
   ws.on('message', (raw) => {
+    msgsSinceLog++;
     const text = raw.toString();
     if (!text) return;
     let json;
@@ -91,12 +112,17 @@ function connectUpstream() {
         const decoded = decode(text);
         json = JSON.parse(decoded);
       }
-    } catch {
+    } catch (e) {
+      if (msgsSinceLog <= 3) console.warn('[lightning] parse failed, first bytes:', text.slice(0, 60));
       return;
     }
     const lat = typeof json.lat === 'number' ? json.lat : null;
     const lon = typeof json.lon === 'number' ? json.lon : null;
-    if (lat == null || lon == null) return;
+    if (lat == null || lon == null) {
+      if (msgsSinceLog <= 3) console.warn('[lightning] message without lat/lon, keys:', Object.keys(json).slice(0, 8).join(','));
+      return;
+    }
+    strikesSinceLog++;
     const strike = {
       t:    Date.now(),
       lat:  +lat.toFixed(3),
