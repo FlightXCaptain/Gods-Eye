@@ -274,7 +274,7 @@ function classifyLOD(points, cellPx = 36) {
 
 
 function Globe({
-  width, height, data, nowCursor, onPickMarker, focusTarget,
+  width, height, data, nowCursor, onPickMarker, onFocusItem, focusTarget,
   theme, animationIntensity = 0.7, layers, autoRotate = true,
   onInteract, zoomOutSignal = 0,
 }) {
@@ -578,11 +578,18 @@ function Globe({
     };
     el.addEventListener('wheel', onWheel, { passive: false });
 
-    // Double click — zoom in to point
+    // Double click — if on a marker, focus + track it (parent decides zoom
+    // level and whether to keep centring as the object moves). Otherwise
+    // fall through to a generic free-space zoom toward the cursor.
     const onDbl = (e) => {
       markInteraction();
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const hit = hitTest(mx, my);
+      if (hit && onFocusItem) {
+        onFocusItem(hit);
+        return;
+      }
       projection.rotate(rotRef.current).scale(scaleRef.current);
       const inv = projection.invert([mx, my]);
       if (!inv) return;
@@ -673,7 +680,7 @@ function Globe({
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
     };
-  }, [width, height, projection, onPickMarker]);
+  }, [width, height, projection, onPickMarker, onFocusItem]);
 
   const hitRegionsRef = useRef([]);
   // City hit regions are rebuilt with the base canvas (only redraws on
@@ -831,6 +838,24 @@ function Globe({
         if (tickNow - lastBaseRedrawMsRef.current > 33) {
           dirtyBase.current = true;
           lastBaseRedrawMsRef.current = tickNow;
+        }
+      }
+
+      // Live-track moving objects when the user double-clicked to focus
+      // them. Each frame we re-resolve the tracked item's current position
+      // from the data stream (flights/ships update every 15–30 s, ISS every
+      // second) and update the target rotation so the easing interpolator
+      // keeps the globe centred on the object as it moves.
+      if (focusTarget?.trackId && data) {
+        let live = null;
+        switch (focusTarget.trackLayer) {
+          case 'iss':    live = data.iss; break;
+          case 'flight': live = data.flights?.find(f => f.id === focusTarget.trackId); break;
+          case 'ship':   live = data.ships?.find(s => s.mmsi === focusTarget.trackId); break;
+          case 'sat':    live = data.sats?.find(s => (s.norad || s.name) === focusTarget.trackId); break;
+        }
+        if (live && typeof live.lat === 'number' && typeof live.lon === 'number') {
+          targetRotRef.current = [-live.lon, -live.lat, 0];
         }
       }
 
