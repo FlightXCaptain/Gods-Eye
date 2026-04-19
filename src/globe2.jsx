@@ -152,31 +152,6 @@ function iconEvent(ctx, cx, cy, size, color) {
   ctx.fill();
 }
 
-// Camera: compact body with lens bump — readable at size 9–12, recognisable
-// as a camcorder/webcam silhouette at a glance. Dark lens pupil provides
-// contrast against the coloured body so category colour (volcano = orange,
-// park = green, etc.) still reads without overwhelming the eye.
-function iconCamera(ctx, cx, cy, size, color) {
-  const s = size * 0.5;
-  ctx.fillStyle = color;
-  // body
-  ctx.fillRect(cx - s, cy - s*0.5, s*2, s*1.1);
-  // viewfinder bump on top
-  ctx.fillRect(cx - s*0.35, cy - s*0.85, s*0.7, s*0.35);
-  // lens — darker inner disc for contrast
-  ctx.beginPath();
-  ctx.arc(cx, cy + s*0.08, s*0.42, 0, Math.PI*2);
-  ctx.fillStyle = 'rgba(0,0,0,0.65)';
-  ctx.fill();
-  // glint
-  ctx.beginPath();
-  ctx.arc(cx, cy + s*0.08, s*0.18, 0, Math.PI*2);
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.9;
-  ctx.fill();
-  ctx.globalAlpha = 1;
-}
-
 // Satellite: tiny horizontal body with two rectangular solar panel wings.
 // Reads as "sat with panels" at any size; distinct from ISS which is larger + labelled.
 function iconSat(ctx, cx, cy, size, color) {
@@ -353,19 +328,11 @@ function Globe({
     return window.subscribeWind((g) => { windGridRef.current = g; });
   }, []);
 
-  // Cameras — subscribe to the static camera list from /api/cameras (see
-  // src/cameras.jsx). Small array (~25–500 entries), replaced wholesale on
-  // each refresh; stored in a ref so updates don't trigger re-renders.
-  const camerasRef = useRef([]);
   // Live position of the currently-tracked object — written every frame by
   // the tracking block in the tick loop, read by the reticle renderer so
   // the ring follows a moving target instead of sitting at the dblclick
   // position forever. null when nothing is being tracked.
   const focusLiveCoordsRef = useRef(null);
-  useEffect(() => {
-    if (typeof window.subscribeCameras !== 'function') return;
-    return window.subscribeCameras((list) => { camerasRef.current = list || []; });
-  }, []);
 
   // Initialise / refresh the wind particle pool when size changes. Random
   // lon/lat and ages so the fade-in is staggered rather than synchronous.
@@ -1294,42 +1261,6 @@ function Globe({
         }
       }
 
-      // Cameras — same LOD strategy as quakes/events. With Windy attached
-      // we can receive 20k+ entries; at low zoom Europe/California alone
-      // would be an opaque dogpile without decimation. Spatial binning
-      // keeps one marker per bin at a given zoom, collapsing clusters to
-      // a single "here there be cameras" dot.
-      if (layers.cameras && camerasRef.current && camerasRef.current.length) {
-        const camColor = (cat) => {
-          switch (cat) {
-            case 'volcano':  return '#f97316';
-            case 'park':     return '#10b981';
-            case 'wildlife': return '#14b8a6';
-            case 'city':     return isDark ? '#e5e7eb' : '#1f2937';
-            case 'airport':  return '#7dd3fc';
-            default:         return '#f472b6';
-          }
-        };
-        const cPts = [];
-        for (const cam of camerasRef.current) {
-          if (typeof cam.lat !== 'number' || typeof cam.lon !== 'number') continue;
-          if (!visibleOn(projection, cam.lon, cam.lat)) continue;
-          const pt = projection([cam.lon, cam.lat]); if (!pt) continue;
-          cPts.push({ px: pt[0], py: pt[1], cam });
-        }
-        // Larger cell than events so 20k cams still render readably at zoom 1.
-        const lod = classifyLOD(cPts, Math.max(22, 34 / zoom));
-        for (let i = 0; i < cPts.length; i++) {
-          const { px, py, cam } = cPts[i];
-          const { mode } = lod[i];
-          const col = camColor(cam.category);
-          if (mode === 'full')         iconCamera(octx, px, py, 12, col);
-          else if (mode === 'compact') iconCamera(octx, px, py, 8,  col);
-          else                         iconCamera(octx, px, py, 5,  col);
-          pushHit(px, py, mode === 'full' ? 8 : 6, 'camera', cam);
-        }
-      }
-
       // Plane glyph — clean aviation-tracker silhouette, designed at 10px
       // nose-to-tail. Shared between flight rendering below.
       const planeFill   = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.88)';
@@ -1557,25 +1488,27 @@ function Globe({
 
       // Focus reticle — prefer the live-tracked position (updated each
       // frame for flights/ships/ISS) and fall back to the stored dblclick
-      // coords for stationary targets like cameras and cities.
+      // coords for stationary targets like cities and quakes.
       const reticleCoords = focusLiveCoordsRef.current || focusTarget?.coords;
       if (reticleCoords && visibleOn(projection, reticleCoords[0], reticleCoords[1])) {
         const pt = projection(reticleCoords);
         if (pt) {
-          const r = 34;
-          octx.strokeStyle = '#f43f5e'; octx.lineWidth = 1.2;
-          octx.beginPath(); octx.arc(pt[0], pt[1], r, 0, Math.PI*2); octx.stroke();
-          const dash = (now/40) % 30;
-          octx.save();
-          octx.setLineDash([6,5]); octx.lineDashOffset = -dash;
-          octx.beginPath(); octx.arc(pt[0], pt[1], r+6, 0, Math.PI*2); octx.stroke();
-          octx.restore();
+          // Minimal crosshair: four short cardinal ticks + a small centre
+          // dot. Deliberately smaller than the marker so you can see what
+          // you're tracking without the reticle swallowing it.
+          octx.strokeStyle = '#f43f5e';
+          octx.fillStyle   = '#f43f5e';
+          octx.lineWidth   = 1.2;
+          const inner = 6, outer = 12;
           octx.beginPath();
-          octx.moveTo(pt[0]-r-12, pt[1]); octx.lineTo(pt[0]-r-4, pt[1]);
-          octx.moveTo(pt[0]+r+4, pt[1]); octx.lineTo(pt[0]+r+12, pt[1]);
-          octx.moveTo(pt[0], pt[1]-r-12); octx.lineTo(pt[0], pt[1]-r-4);
-          octx.moveTo(pt[0], pt[1]+r+4); octx.lineTo(pt[0], pt[1]+r+12);
+          octx.moveTo(pt[0] - outer, pt[1]); octx.lineTo(pt[0] - inner, pt[1]);
+          octx.moveTo(pt[0] + inner, pt[1]); octx.lineTo(pt[0] + outer, pt[1]);
+          octx.moveTo(pt[0], pt[1] - outer); octx.lineTo(pt[0], pt[1] - inner);
+          octx.moveTo(pt[0], pt[1] + inner); octx.lineTo(pt[0], pt[1] + outer);
           octx.stroke();
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], 1.5, 0, Math.PI*2);
+          octx.fill();
         }
       }
 
@@ -1618,18 +1551,6 @@ function Globe({
           })()}
           {hover._layer === 'quake' && <span>M{hover.mag?.toFixed(1)} · {hover.place}</span>}
           {hover._layer === 'event' && <span>{hover.category} · {hover.title}</span>}
-          {hover._layer === 'camera' && (() => {
-            const camCategoryColor = {
-              volcano:'#f97316', park:'#10b981', wildlife:'#14b8a6',
-              airport:'#7dd3fc', city:'#e5e7eb', other:'#f472b6',
-            };
-            const cat = hover.category || 'other';
-            const col = camCategoryColor[cat] || camCategoryColor.other;
-            return <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: col }}/>
-              <span>{hover.title}{hover.source ? ` · ${hover.source}` : ''}</span>
-            </span>;
-          })()}
           {hover._layer === 'tsunami' && <span>Tsunami · {hover.location || hover.country} {hover.year || ''}</span>}
           {hover._layer === 'city' && <span>{hover.name}{hover.country ? ` · ${hover.country}` : ''}</span>}
           {hover._layer === 'cluster' && <span>{hover.count} {hover.layer}{hover.count>1?'s':''} — click to zoom</span>}
