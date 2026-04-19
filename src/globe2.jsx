@@ -1792,15 +1792,23 @@ function Globe({
               const o = list[i];
               const off = list.length === 1 ? 0 : (i / (list.length - 1) - 0.5) * span;
               const px = pt[0] + off, py = pt[1];
-              // Cause-specific hue. Most common: GOVERNMENT_DIRECTED (red),
-              // WEATHER (amber), CABLE (violet), POWER_OUTAGE (orange),
-              // TECHNICAL_PROBLEM (slate). Default: red.
+              // Cause-specific hue. Cloudflare Radar's cause enum has grown
+              // over time; we match each observed value explicitly so new
+              // causes don't silently fall through to the "government
+              // shutdown" red. Also match CABLE / CABLE_CUT interchangeably
+              // since the feed has used both spellings over different
+              // advisories.
+              const cause = (o.cause || '').toUpperCase();
               const causeColor =
-                o.cause === 'WEATHER' ? '#f59e0b' :
-                o.cause === 'CABLE' ? '#a78bfa' :
-                o.cause === 'POWER_OUTAGE' ? '#fb923c' :
-                o.cause === 'TECHNICAL_PROBLEM' ? '#94a3b8' :
-                '#ef4444';
+                cause === 'WEATHER'                     ? '#f59e0b' :   // amber
+                cause === 'POWER_OUTAGE'                ? '#fb923c' :   // orange
+                cause === 'CABLE' || cause === 'CABLE_CUT' ? '#a78bfa' : // violet
+                cause === 'TECHNICAL_PROBLEM'           ? '#94a3b8' :   // slate
+                cause === 'MILITARY_ACTION'             ? '#be123c' :   // dark red
+                cause === 'CYBERATTACK'                 ? '#d946ef' :   // fuchsia
+                cause === 'UNKNOWN' || cause === ''     ? '#64748b' :   // muted slate
+                cause === 'GOVERNMENT_DIRECTED'         ? '#ef4444' :   // red
+                /* default */                            '#ef4444';
               // Core dot
               octx.fillStyle = causeColor;
               octx.beginPath();
