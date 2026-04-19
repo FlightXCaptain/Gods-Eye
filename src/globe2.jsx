@@ -717,12 +717,12 @@ function Globe({
       if (e.touches.length < 2) {
         pinchLastDist = 0;
         pinchAnchor = null;
-        // Small delay before re-enabling drag keeps a fast release from
-        // immediately registering the remaining finger's touchmove as a
-        // new drag gesture.
-        if (pinchActive) {
-          setTimeout(() => { pinchActive = false; }, 30);
-        }
+        // Clear pinchActive immediately. Earlier versions had a 30 ms
+        // grace window "to avoid the remaining finger accidentally
+        // restarting drag" — but in practice it created a dead zone
+        // where single-finger input felt unrecognised. Clean transition
+        // is the better default.
+        pinchActive = false;
       }
       // Double-tap detection — only valid when the user had exactly one
       // finger down, barely moved, and released cleanly.
@@ -1745,7 +1745,7 @@ function Globe({
 
   return (
     <div ref={wrapRef} className="grabbable select-none" style={{ position:'relative', width, height, touchAction:'none' }}>
-      <canvas ref={baseRef} style={{ position:'absolute', inset:0 }} />
+      <canvas ref={baseRef} style={{ position:'absolute', inset:0, pointerEvents:'none' }} />
       <canvas ref={windRef} style={{ position:'absolute', inset:0, pointerEvents:'none' }} />
       <canvas ref={overRef} style={{ position:'absolute', inset:0, pointerEvents:'none' }} />
       {hover && (
