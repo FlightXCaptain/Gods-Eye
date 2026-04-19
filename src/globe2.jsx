@@ -1157,10 +1157,25 @@ function Globe({
     const wctx = wind.getContext('2d'); wctx.scale(dpr, dpr);
     dirtyBase.current = true;
 
+    // "Recently moved" detector — used to pick the cheap 110m land tier
+    // during any kind of view change (auto-rotate, drag, pinch, inertial
+    // scroll, focus-target tween) so the 10m dataset only kicks in when
+    // the view is actually still. 200 ms quiet is enough to know the
+    // user has stopped interacting.
+    let lastRot = [0, 0, 0], lastScale = 0, lastMoveTs = 0;
+
     const tick = () => {
       const tickNow = performance.now();
       const frameDt = lastFrameMsRef.current ? (tickNow - lastFrameMsRef.current) / 1000 : 0;
       lastFrameMsRef.current = tickNow;
+
+      const rNow = rotRef.current, sNow = scaleRef.current;
+      if (rNow[0] !== lastRot[0] || rNow[1] !== lastRot[1] || sNow !== lastScale) {
+        lastRot = [rNow[0], rNow[1], rNow[2]];
+        lastScale = sNow;
+        lastMoveTs = tickNow;
+      }
+      const recentlyMoved = tickNow - lastMoveTs < 200;
 
       // Auto-rotate runs whenever the prop is true. Interactions flip it
       // off via onInteract (parent owns the flag). Base redraw is throttled
@@ -1321,17 +1336,24 @@ function Globe({
           bctx.restore();
         }
 
-        // Land — wireframe outline (the signature look). Pick the
-        // detail tier per zoom + motion state: 110m during auto-rotate
-        // or globe view (cheap, no stepping visible at that scale),
-        // 50m at regional zoom, 10m only when zoomed in and still so
-        // you can see Malta / Guam / Caymans coastlines. Fallbacks
-        // gracefully if a higher tier hasn't loaded yet.
-        const moving = autoRotate && !focusTarget;
+        // Land — wireframe outline (the signature look). Tier picked
+        // per zoom + motion state:
+        //   • 110m (<200 polys, ~100 KB) — any active motion or
+        //     globe-scale zoom. Includes drag, pinch, inertial
+        //     scroll, focus tween, auto-rotate.
+        //   • 50m  (~700 polys, ~700 KB) — still, regional zoom.
+        //   • 10m  (~15 k polys, ~3 MB)  — still AND zoomed in
+        //     (≥4). The only state where Malta / Guam / Caymans
+        //     coastlines actually read at pixel scale. Bumped the
+        //     threshold from 3 → 4 because even 10m at zoom 3 hurts
+        //     FPS during the panning most users do at that zoom.
+        //
+        // Tiers fall back gracefully while the higher-res files are
+        // still streaming.
         const landTier =
-          moving || zoomB < 1.4 ? (landLowRef.current  || landMidRef.current || landHighRef.current) :
-          zoomB < 3             ? (landMidRef.current  || landLowRef.current || landHighRef.current) :
-                                   (landHighRef.current || landMidRef.current || landLowRef.current);
+          recentlyMoved || zoomB < 1.4 ? (landLowRef.current  || landMidRef.current || landHighRef.current) :
+          zoomB < 4                    ? (landMidRef.current  || landLowRef.current || landHighRef.current) :
+                                          (landHighRef.current || landMidRef.current || landLowRef.current);
         if (landTier) {
           landRef.current = landTier;
           bctx.beginPath(); path(landTier);
