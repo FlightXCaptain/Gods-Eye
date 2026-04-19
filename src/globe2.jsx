@@ -534,7 +534,10 @@ function Globe({
   useEffect(() => {
     (async () => {
       try {
-        const t = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json');
+        // 50m resolution adds small inhabited islands (Guam, Malta, Caymans,
+        // Faroes, Maldives, etc.) that 110m drops — ~700 KB extra on a
+        // one-time load, worth it for a dashboard that tracks surface assets.
+        const t = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-50m.json');
         landRef.current = topojson.feature(t, t.objects.land);
         gridRef.current = d3.geoGraticule().step([15,15])();
         dirtyBase.current = true;
@@ -547,10 +550,13 @@ function Globe({
         dirtyBase.current = true;
       } catch (e) { console.warn('countries topo fail', e); }
 
-      // Hit-test dataset — Natural Earth 110m has names and includes lake holes,
-      // so clicks inside lakes resolve to the lake, not the surrounding country.
+      // Hit-test dataset — Natural Earth 50m has names and lake holes, so
+      // clicks inside lakes resolve to the lake (not the surrounding country)
+      // AND clicks on small islands (Guam, Malta, Caymans, …) resolve to the
+      // correct country instead of falling through to ocean as they did at
+      // 110m where those islands don't exist as features.
       try {
-        const hc = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/110m/cultural/ne_110m_admin_0_countries_lakes.json');
+        const hc = await d3.json('https://cdn.jsdelivr.net/gh/martynafford/natural-earth-geojson@master/50m/cultural/ne_50m_admin_0_countries_lakes.json');
         countryFeaturesRef.current = hc.features || [];
       } catch (e) { console.warn('country hit-data load fail', e); }
 
