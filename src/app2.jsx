@@ -511,22 +511,48 @@ function Stat({ label, value, accent, title }) {
 }
 
 function StatBar({ data, kp }) {
-  const flightCount = data.flights?.length || 0;
-  const shipCount = data.ships?.length || 0;
-  const quakeCount = data.quakes?.length || 0;
-  const eventCount = data.events?.length || 0;
-  const satCount = data.sats?.length || 0;
-  // All six stats show on every breakpoint. The container is horizontally
-  // scrollable so overflow is a scroll gesture rather than hidden info.
-  // Mobile uses a 3-char abbreviation for the label so each pill stays narrow.
+  const flightCount  = data.flights?.length || 0;
+  const shipCount    = data.ships?.length || 0;
+  const quakeCount   = data.quakes?.length || 0;
+  const eventCount   = data.events?.length || 0;
+  const satCount     = data.sats?.length || 0;
+  const cycloneCount = data.cyclones?.length || 0;
+  const outageCount  = (data.outages || []).filter(o => o.ongoing).length;
+  const newsCount    = data.news?.length || 0;
+  const reactorCount = (data.reactors || []).filter(r => (r.status || '').toLowerCase().includes('operational')).length;
+  const plantCount   = data.plants?.length || 0;
+  const cableCount   = data.cables?.length || 0;
+  // Stats scroll horizontally on overflow; new layers only appear in the
+  // bar when their data is actually loaded (cables/reactors/plants are
+  // off by default and only relevant to users who flip them on).
   const items = [
     { label: 'Flights',      short: 'Flights', shortMobile: 'FLT', val: flightCount.toLocaleString(), glyph: 'flight', color: '#7dd3fc', title: 'Aircraft currently airborne (ADS-B via airplanes.live)' },
     { label: 'Ships',        short: 'Ships',   shortMobile: 'SHP', val: shipCount.toLocaleString(),   glyph: 'ship',   color: '#22d3ee', title: 'Vessels at sea (AIS via AISStream)' },
     { label: 'Satellites',   short: 'Sats',    shortMobile: 'SAT', val: satCount.toLocaleString(),    glyph: 'sat',    color: '#d946ef', title: 'Orbital objects propagated from CelesTrak TLEs' },
     { label: 'Earthquakes',  short: 'Quakes',  shortMobile: 'SEI', val: quakeCount,                   glyph: 'quake',  color: '#fb923c', title: 'Seismic events in the last 24h (USGS)' },
     { label: 'Natural events', short: 'Nature',shortMobile: 'NAT', val: eventCount,                   glyph: 'fire',   color: '#ef4444', title: 'Currently active storms, wildfires, volcanoes, ice (NASA EONET, status=open)' },
-    { label: 'Geomagnetic',  short: 'Kp',      shortMobile: 'Kp',  val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' },
   ];
+  if (cycloneCount > 0) items.push(
+    { label: 'Tropical cyclones', short: 'Cyclones', shortMobile: 'TC', val: cycloneCount, glyph: 'storm', color: '#f97316', title: 'Active tropical cyclones (NHC, Atlantic + Eastern/Central Pacific)' }
+  );
+  if (outageCount > 0) items.push(
+    { label: 'Internet outages', short: 'Outages', shortMobile: 'OUT', val: outageCount, glyph: 'bolt',  color: '#ef4444', title: 'Currently-ongoing internet outages worldwide (Cloudflare Radar)' }
+  );
+  if (newsCount > 0) items.push(
+    { label: 'News hotspots', short: 'News', shortMobile: 'NWS', val: newsCount.toLocaleString(), glyph: 'wiki', color: '#a78bfa', title: 'Geocoded events in the latest GDELT 15-minute window' }
+  );
+  if (reactorCount > 0) items.push(
+    { label: 'Reactors',  short: 'Reactors', shortMobile: 'NUC', val: reactorCount, glyph: 'radiation', color: '#22c55e', title: 'Operational nuclear reactors (GeoNuclearData)' }
+  );
+  if (plantCount > 0) items.push(
+    { label: 'Power plants ≥100 MW', short: 'Plants', shortMobile: 'PWR', val: plantCount.toLocaleString(), glyph: 'bolt', color: '#f59e0b', title: 'Utility-scale power plants ≥100 MW (WRI GPPD)' }
+  );
+  if (cableCount > 0) items.push(
+    { label: 'Submarine cables', short: 'Cables', shortMobile: 'CBL', val: cableCount, glyph: 'aurora', color: '#22d3ee', title: 'Submarine communications cables (TeleGeography)' }
+  );
+  items.push(
+    { label: 'Geomagnetic',  short: 'Kp',      shortMobile: 'Kp',  val: kp?.kp?.toFixed(1) ?? '—',    glyph: 'aurora', color: kp?.kp >= 5 ? '#ef4444' : '#84cca3', title: 'Planetary K-index — geomagnetic activity (NOAA SWPC). 5+ = storm' }
+  );
   return (
     <div className="glass rounded-full pl-2 pr-2.5 sm:pr-3 py-1.5 flex items-center gap-2 sm:gap-3 text-xs relative overflow-x-auto scrollbar-none max-w-full tk-mask">
       {items.map((it, i) => (
