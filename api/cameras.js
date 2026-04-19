@@ -116,6 +116,23 @@ function mapWindyCategory(catId) {
 }
 
 // ---------- NPS -------------------------------------------------------------
+//
+// NPS's API has a long-standing quirk where some URL fields come back
+// concatenated, e.g. "https://www.nps.govhttps://www.nps.gov/common/..."
+// We also need to handle relative paths (/common/uploads/...).
+function sanitizeNpsUrl(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  // Keep only the segment starting at the last `https://` (or `http://`) — if
+  // there's no scheme in the string we treat it as a site-relative path.
+  const lastHttps = raw.lastIndexOf('https://');
+  const lastHttp  = raw.lastIndexOf('http://');
+  const lastScheme = Math.max(lastHttps, lastHttp);
+  if (lastScheme > 0) return raw.slice(lastScheme);
+  if (lastScheme === 0) return raw;
+  // No scheme — looks like a relative path. Prefix with nps.gov.
+  if (raw.startsWith('/')) return 'https://www.nps.gov' + raw;
+  return raw;
+}
 
 async function fetchNPS(key) {
   try {
@@ -137,9 +154,11 @@ function mapNPS(w) {
   if (!isFinite(lat) || !isFinite(lon)) return null;
   // NPS exposes images + a streamingUrl. Prefer HLS streams; otherwise use
   // the static image as a refreshing still; fall back to link-only.
-  const streamUrl = w.streamingUrl || w.streamUrl || null;
-  const imgUrl = (Array.isArray(w.images) && w.images[0]?.url) || null;
-  const pageUrl = (w.url && (w.url.startsWith('http') ? w.url : `https://www.nps.gov${w.url}`))
+  // All URLs go through sanitizeNpsUrl() to strip the double-prefix and
+  // handle relative paths — see function comment above.
+  const streamUrl = sanitizeNpsUrl(w.streamingUrl || w.streamUrl);
+  const imgUrl = sanitizeNpsUrl(Array.isArray(w.images) && w.images[0]?.url);
+  const pageUrl = sanitizeNpsUrl(w.url)
     || `https://www.nps.gov/search?query=${encodeURIComponent(w.title || 'webcam')}`;
 
   let embed;

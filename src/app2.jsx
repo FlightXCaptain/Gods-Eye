@@ -441,48 +441,42 @@ function StatBar({ data, kp }) {
   );
 }
 
-function Dossier({ item, onClose }) {
+function Dossier({ item, onClose, onFocus }) {
   if (!item) return null;
   const layer = item._layer || item.kind;
   const hasCoords = typeof item.lon === 'number' && typeof item.lat === 'number';
-  const diveInMeta = (() => {
+  // Per-layer zoom presets — how close to zoom the globe when "Zoom to" is
+  // clicked. Fast-moving or wide-scope objects zoom less so the target stays
+  // on-screen; stationary point-of-interest items zoom closer.
+  const zoomByLayer = {
+    iss: 1.6, sat: 1.6, country: 1.8,
+    event: 2.5, lake: 2.5, quake: 3,
+    flight: 3, city: 3.5, ship: 4,
+    camera: 4,
+  };
+  const focusLabel = (() => {
     switch (layer) {
-      case 'iss':
-        return { label: item.name || 'ISS · ZARYA', altMeters: 8000 };
-      case 'sat':
-        return { label: item.name || 'Satellite', altMeters: 8000 };
-      case 'flight':
-        return { label: item.callsign || item.reg || 'Aircraft', altMeters: 3000 };
-      case 'ship':
-        return { label: item.name || `MMSI ${item.mmsi}`, altMeters: 1500 };
-      case 'city':
-        return { label: item.name || 'City', altMeters: 2500 };
-      case 'country':
-        return { label: item.name || 'Country', altMeters: 50000 };
-      case 'lake':
-        return { label: item.name || 'Lake', altMeters: 8000 };
-      case 'quake': {
-        const mag = typeof item.mag === 'number' ? item.mag.toFixed(1) : '?';
-        return { label: `M${mag} · ${item.place || 'Earthquake'}`, altMeters: 4000 };
-      }
-      case 'event':
-        return { label: item.title || 'Event', altMeters: 5000 };
-      case 'camera':
-        return { label: item.title || 'Live camera', altMeters: 1200 };
-      default:
-        return null;
+      case 'iss':     return item.name || 'ISS · ZARYA';
+      case 'sat':     return item.name || 'Satellite';
+      case 'flight':  return item.callsign || item.reg || 'Aircraft';
+      case 'ship':    return item.name || `MMSI ${item.mmsi}`;
+      case 'city':    return item.name || 'City';
+      case 'country': return item.name || 'Country';
+      case 'lake':    return item.name || 'Lake';
+      case 'quake':   return `M${typeof item.mag === 'number' ? item.mag.toFixed(1) : '?'} · ${item.place || 'Earthquake'}`;
+      case 'event':   return item.title || 'Event';
+      case 'camera':  return item.title || 'Live camera';
+      default:        return 'Target';
     }
   })();
-  const handleDiveIn = () => {
-    if (typeof window.openCesiumDiveIn !== 'function') {
-      console.warn('cesium viewer not ready');
-      return;
-    }
-    window.openCesiumDiveIn({
-      lon: item.lon,
-      lat: item.lat,
-      label: diveInMeta?.label,
-      altMeters: diveInMeta?.altMeters,
+  const canFocus = hasCoords && typeof onFocus === 'function';
+  const handleFocus = () => {
+    if (!canFocus) return;
+    onFocus({
+      type: layer,
+      label: focusLabel,
+      coords: [item.lon, item.lat],
+      zoom: zoomByLayer[layer] || 2.5,
     });
   };
   return (
@@ -644,15 +638,18 @@ function Dossier({ item, onClose }) {
             )}
           </div>
         </>}
-        {hasCoords && diveInMeta && (
+        {canFocus && (
           <div className="pt-1">
             <button
               type="button"
-              onClick={handleDiveIn}
-              title="Open photoreal view"
-              className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition"
+              onClick={handleFocus}
+              title="Rotate globe and zoom in"
+              className="rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition inline-flex items-center gap-1.5"
             >
-              Dive in →
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/><path d="M11 8v6M8 11h6"/>
+              </svg>
+              Zoom to
             </button>
           </div>
         )}
@@ -1264,7 +1261,11 @@ function App() {
       {/* Dossier */}
       {picked && (
         <div className="absolute top-20 right-4 z-20 pointer-events-auto animate-fade-in">
-          <Dossier item={picked} onClose={()=>setPicked(null)}/>
+          <Dossier
+            item={picked}
+            onClose={()=>setPicked(null)}
+            onFocus={(target)=>setFocusTarget(target)}
+          />
         </div>
       )}
 
