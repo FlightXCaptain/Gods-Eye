@@ -534,10 +534,16 @@ function Globe({
   useEffect(() => {
     (async () => {
       try {
-        // 50m resolution adds small inhabited islands (Guam, Malta, Caymans,
-        // Faroes, Maldives, etc.) that 110m drops — ~700 KB extra on a
-        // one-time load, worth it for a dashboard that tracks surface assets.
-        const t = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-50m.json');
+        // 10m resolution — the next jump from 50m. 50m technically includes
+        // Malta, Guam etc. but represents them as 6–10 point polygons that
+        // render as invisible slivers at globe-scale zoom. 10m gives each
+        // small island a properly shaped coastline with enough points to
+        // actually read on screen, at the cost of ~3 MB on a one-time load.
+        // Cached by jsdelivr and by the browser after first visit, so the
+        // recurring cost is zero. Country hit-test stays at 50m because the
+        // richer Natural Earth property set (ISO, continent, pop, GDP) isn't
+        // available on the world-atlas variants.
+        const t = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-10m.json');
         landRef.current = topojson.feature(t, t.objects.land);
         gridRef.current = d3.geoGraticule().step([15,15])();
         dirtyBase.current = true;
