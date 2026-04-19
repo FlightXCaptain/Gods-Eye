@@ -282,6 +282,12 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <path d="M10 3 A 5 5 0 1 0 10 11 A 4 4 0 1 1 10 3 Z" fill={color}/>
         </svg>
       );
+    case 'bolt':
+      return (
+        <svg {...props}>
+          <path d="M8 1 L3 8 L6.5 8 L5 13 L11 6 L7.5 6 L9 1 Z" fill={color}/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -296,6 +302,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) 
     ['quakes','Seismic',  'quake',   '#fb923c'],
     ['events','Natural events', 'fire', '#ef4444'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
+    ['lightning','Lightning strikes', 'bolt', '#fef08a'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
     ['wind','Wind flow',  'aurora',  '#60a5fa'],
     ['daynight','Day / night shade', 'moon',  '#94a3b8'],
@@ -888,7 +895,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, tsunamis:false, wind:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
