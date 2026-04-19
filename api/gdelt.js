@@ -65,7 +65,7 @@ async function loadHotspots() {
   const ab = await resp.arrayBuffer();
   const csv = unzipFirst(Buffer.from(ab)).toString('utf8');
 
-  // GDELT events CSV is TAB-separated, 58 columns, no header row.
+  // GDELT 2.0 events CSV: tab-separated, 61 columns, no header row.
   // Column indices of interest:
   //   0  GLOBALEVENTID
   //  26  EventCode          (full CAMEO code)
@@ -74,20 +74,20 @@ async function loadHotspots() {
   //  30  GoldsteinScale     (-10..+10 conflict/cooperation)
   //  31  NumMentions
   //  34  AvgTone            (-10..+10 sentiment)
-  //  50  ActionGeo_FullName (place label)
-  //  51  ActionGeo_CountryCode
-  //  54  ActionGeo_Lat
-  //  55  ActionGeo_Long
-  //  57  DATEADDED
-  //  58  SOURCEURL
+  //  52  ActionGeo_FullName (place label)
+  //  53  ActionGeo_CountryCode
+  //  56  ActionGeo_Lat
+  //  57  ActionGeo_Long
+  //  59  DATEADDED
+  //  60  SOURCEURL
   const out = [];
   const rows = csv.split('\n');
   for (const row of rows) {
     if (!row) continue;
     const f = row.split('\t');
-    if (f.length < 59) continue;
-    const lat = parseFloat(f[54]);
-    const lon = parseFloat(f[55]);
+    if (f.length < 61) continue;
+    const lat = parseFloat(f[56]);
+    const lon = parseFloat(f[57]);
     if (!isFinite(lat) || !isFinite(lon)) continue;
     // Drop (0,0) — GDELT uses this when a row didn't actually geocode.
     if (lat === 0 && lon === 0) continue;
@@ -96,15 +96,15 @@ async function loadHotspots() {
     out.push({
       id: f[0],
       lon, lat,
-      place: f[50] || '',
-      country: f[51] || '',
+      place: f[52] || '',
+      country: f[53] || '',
       rootCode,
       quad: parseInt(f[29], 10) || 0,
       goldstein: parseFloat(f[30]) || 0,
       mentions: parseInt(f[31], 10) || 1,
       tone: parseFloat(f[34]) || 0,
-      dateAdded: f[57],
-      url: f[58] || null,
+      dateAdded: f[59],
+      url: f[60] || null,
     });
   }
   cached = out;
@@ -115,27 +115,6 @@ async function loadHotspots() {
 
 export default async function handler(req, res) {
   try {
-    const url = new URL(req.url, 'http://x');
-    if (url.searchParams.get('debug') === '1') {
-      const eventsUrl = await latestEventsUrl();
-      const resp = await fetch(eventsUrl);
-      const ab = await resp.arrayBuffer();
-      const csv = unzipFirst(Buffer.from(ab)).toString('utf8');
-      const rows = csv.split('\n').filter(Boolean);
-      const first = rows[0]?.split('\t');
-      const geocoded = rows.filter(r => {
-        const f = r.split('\t');
-        return f.length >= 59 && isFinite(parseFloat(f[54])) && isFinite(parseFloat(f[55]));
-      }).length;
-      return res.status(200).json({
-        eventsUrl,
-        csvBytes: csv.length,
-        rows: rows.length,
-        firstColCount: first?.length,
-        firstSample: first?.slice(0, 5),
-        geocoded,
-      });
-    }
     const now = Date.now();
     if (!cached || now - cachedAt > TTL_MS) {
       await loadHotspots();
@@ -144,6 +123,6 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
     return res.status(200).json(cached);
   } catch (err) {
-    return res.status(502).json({ error: 'gdelt-failed', message: String(err), stack: String(err?.stack || '').slice(0, 500) });
+    return res.status(502).json({ error: 'gdelt-failed', message: String(err) });
   }
 }
