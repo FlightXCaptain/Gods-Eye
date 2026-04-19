@@ -1814,6 +1814,62 @@ function Globe({
         octx.restore();
       }
 
+      // Ship destination line — when a ship is focused and its declared
+      // AIS destination resolves to a known port in src/ports.jsx, draw
+      // a faint great-circle from the ship's live position to the port.
+      // Uses d3.geoInterpolate for proper curvature on the orthographic
+      // projection.
+      if (focusTarget?.trackLayer === 'ship' && focusTarget.trackId
+          && data?.ships && typeof window.resolvePort === 'function') {
+        const ship = data.ships.find(s => s.mmsi === focusTarget.trackId);
+        if (ship && ship.dest && typeof ship.lon === 'number' && typeof ship.lat === 'number') {
+          const port = window.resolvePort(ship.dest);
+          if (port) {
+            const from = [ship.lon, ship.lat];
+            const to   = [port.lon, port.lat];
+            const interp = d3.geoInterpolate(from, to);
+            octx.save();
+            octx.setLineDash([3, 4]);
+            octx.strokeStyle = 'rgba(125, 211, 252, 0.45)';
+            octx.lineWidth = 1.1;
+            let pen = null;
+            const segs = 80;
+            for (let i = 0; i <= segs; i++) {
+              const [lon, lat] = interp(i / segs);
+              if (!visibleOn(projection, lon, lat)) { pen = null; continue; }
+              const pt = projection([lon, lat]);
+              if (!pt) { pen = null; continue; }
+              if (pen) {
+                octx.beginPath();
+                octx.moveTo(pen[0], pen[1]);
+                octx.lineTo(pt[0], pt[1]);
+                octx.stroke();
+              }
+              pen = pt;
+            }
+            octx.setLineDash([]);
+            // Port marker with label
+            if (visibleOn(projection, port.lon, port.lat)) {
+              const pp = projection([port.lon, port.lat]);
+              if (pp) {
+                octx.fillStyle = 'rgba(125, 211, 252, 0.95)';
+                octx.beginPath();
+                octx.arc(pp[0], pp[1], 3, 0, Math.PI * 2);
+                octx.fill();
+                octx.font = 'bold 10px "Geist Mono", ui-monospace, monospace';
+                octx.textAlign = 'center';
+                const tw = octx.measureText(port.name).width;
+                octx.fillStyle = isDark ? 'rgba(10,10,15,0.7)' : 'rgba(255,255,255,0.8)';
+                octx.fillRect(pp[0] - tw/2 - 3, pp[1] - 18, tw + 6, 13);
+                octx.fillStyle = 'rgba(125, 211, 252, 1)';
+                octx.fillText(port.name, pp[0], pp[1] - 8);
+              }
+            }
+            octx.restore();
+          }
+        }
+      }
+
       // Ship historical track — up to 30 days of accumulated positions for
       // the currently-focused ship, drawn as a polyline with age-based
       // alpha fade (older segments more transparent). We draw segments
