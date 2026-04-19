@@ -291,7 +291,13 @@ function propagateSats(tleList, when) {
   if (!window.satellite) return [];
   const satcat = SATCAT_CACHE || {};
   const out = [];
-  const gmst = window.satellite.gstime(when);
+  // Propagate at `when` AND `when + 1s` so we can emit a °/sec velocity
+  // alongside each position. The second propagation is cheap (~6 trig ops
+  // via SGP4 mean motion) and gives the client the velocity it needs for
+  // smooth dead-reckoning between the 2-second propagation cadence.
+  const when2 = new Date(when.getTime() + 1000);
+  const gmst  = window.satellite.gstime(when);
+  const gmst2 = window.satellite.gstime(when2);
   for (const s of tleList) {
     try {
       const rec = window.satellite.twoline2satrec(s.tle1, s.tle2);
@@ -302,10 +308,25 @@ function propagateSats(tleList, when) {
       const lon = window.satellite.degreesLong(geo.longitude);
       const alt = geo.height; // km
       if (!isFinite(lat) || !isFinite(lon)) continue;
+      // Velocity via position delta over 1 second. Reading °/sec directly
+      // avoids the ECI→ECEF→geodetic velocity-vector conversion.
+      let velLat = 0, velLon = 0;
+      const pv2 = window.satellite.propagate(rec, when2);
+      if (pv2?.position) {
+        const geo2 = window.satellite.eciToGeodetic(pv2.position, gmst2);
+        const lat2 = window.satellite.degreesLat(geo2.latitude);
+        const lon2 = window.satellite.degreesLong(geo2.longitude);
+        if (isFinite(lat2) && isFinite(lon2)) {
+          velLat = lat2 - lat;
+          velLon = lon2 - lon;
+          if (velLon > 180) velLon -= 360;
+          if (velLon < -180) velLon += 360;
+        }
+      }
       out.push({
         name: s.name, group: s.group, norad: s.norad,
         owner: s.norad ? satcat[s.norad] : null,
-        lat, lon, alt, kind:'sat',
+        lat, lon, alt, velLat, velLon, kind:'sat',
       });
     } catch {}
   }
