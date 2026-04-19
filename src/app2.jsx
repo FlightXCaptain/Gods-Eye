@@ -12,6 +12,18 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 
 function classNames(...a) { return a.filter(Boolean).join(' '); }
 
+// Bucket a flight into a coarse category for the Layers-popover filter.
+// ADS-B has no cleanly categorical "type" field, so we approximate from
+// the military flag + altitude. 18 000 ft is a rough airliner cruise
+// threshold; 500 ft separates parked/rolling aircraft from airborne.
+function flightBucket(f) {
+  if (f.mil) return 'military';
+  const alt = typeof f.alt === 'number' ? f.alt : 0;
+  if (alt < 500)   return 'ground';
+  if (alt < 18000) return 'ga';
+  return 'airliner';
+}
+
 function useWindowSize() {
   const [s, set] = useState({ w: window.innerWidth, h: window.innerHeight });
   useEffect(() => {
@@ -292,7 +304,8 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
   }
 };
 
-function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) {
+function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
+                         shipFilters, setShipFilters, flightFilters, setFlightFilters }) {
   const [open, setOpen] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
@@ -346,6 +359,52 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) 
                              className="ak w-full" />
                     </div>
                   )}
+                  {/* Flight sub-filter by bucket — toggleable under the
+                      flights row. Bucket derived from mil flag + altitude. */}
+                  {k === 'flights' && layers.flights && (
+                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
+                      {[
+                        ['military', 'Military',  '#ef4444'],
+                        ['airliner', 'Airliners', '#7dd3fc'],
+                        ['ga',       'GA / low',  '#a78bfa'],
+                        ['ground',   'On ground', '#94a3b8'],
+                      ].map(([fk, flabel, fcol]) => (
+                        <label key={fk} className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                          <input type="checkbox" checked={flightFilters[fk] !== false}
+                                 onChange={e => setFlightFilters(x => ({ ...x, [fk]: e.target.checked }))}
+                                 className="accent-accent-500 scale-90"/>
+                          <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: fcol }}/>
+                          <span className="opacity-80">{flabel}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {/* Ship sub-filter — each vessel category toggleable. The
+                      previous static legend (same layout) is now clickable,
+                      which is what users expect from a legend-looking list
+                      of categories. */}
+                  {k === 'ships' && layers.ships && (
+                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      {[
+                        ['cargo',     'Cargo',      '#22d3ee'],
+                        ['tanker',    'Tanker',     '#f59e0b'],
+                        ['passenger', 'Passenger',  '#a78bfa'],
+                        ['fishing',   'Fishing',    '#34d399'],
+                        ['highspeed', 'High-speed', '#f472b6'],
+                        ['service',   'Service',    '#94a3b8'],
+                        ['sail',      'Sail',       '#60a5fa'],
+                        ['other',     'Other',      '#94a3b8'],
+                      ].map(([sk, slabel, scol]) => (
+                        <label key={sk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                          <input type="checkbox" checked={shipFilters[sk] !== false}
+                                 onChange={e => setShipFilters(x => ({ ...x, [sk]: e.target.checked }))}
+                                 className="accent-accent-500 scale-90"/>
+                          <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: scol }}/>
+                          <span className="opacity-80 truncate">{slabel}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </React.Fragment>
               ))}
             </div>
@@ -370,29 +429,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin }) 
               </div>
             )}
 
-            {/* Vessel category legend — explains the ship icon colours */}
-            {layers.ships && (
-              <div className="mt-2 pt-2 border-t border-black/5 dark:border-white/5 px-2">
-                <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider mb-1.5">Vessel types</div>
-                <div className="grid grid-cols-2 gap-y-1 gap-x-3 text-[11px]">
-                  {[
-                    ['Cargo',     '#22d3ee'],
-                    ['Tanker',    '#f59e0b'],
-                    ['Passenger', '#a78bfa'],
-                    ['Fishing',   '#34d399'],
-                    ['High-speed','#f472b6'],
-                    ['Service',   '#94a3b8'],
-                    ['Sail',      '#60a5fa'],
-                    ['Other',     '#94a3b8'],
-                  ].map(([l,c]) => (
-                    <div key={l} className="flex items-center gap-1.5 opacity-80">
-                      <GlyphSVG kind="ship" color={c} size={12}/>
-                      <span>{l}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </>
       )}
@@ -904,6 +940,30 @@ function App() {
     localStorage.setItem('ge-layers', JSON.stringify(merged));
   }, [layers]);
 
+  // Type filters — ship category multi-select + flight bucket multi-select.
+  // Applied in filteredData so the globe receives only matching vessels /
+  // aircraft. Defaults to "show everything" (all true). Persisted in
+  // localStorage alongside the main layers state.
+  const [shipFilters, setShipFilters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ge-ship-filters')) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    const def = { cargo:true, tanker:true, passenger:true, fishing:true, service:true, highspeed:true, sail:true, other:true };
+    const merged = { ...def, ...shipFilters };
+    if (JSON.stringify(merged) !== JSON.stringify(shipFilters)) setShipFilters(merged);
+    localStorage.setItem('ge-ship-filters', JSON.stringify(merged));
+  }, [shipFilters]);
+
+  const [flightFilters, setFlightFilters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ge-flight-filters')) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    const def = { military:true, airliner:true, ga:true, ground:true };
+    const merged = { ...def, ...flightFilters };
+    if (JSON.stringify(merged) !== JSON.stringify(flightFilters)) setFlightFilters(merged);
+    localStorage.setItem('ge-flight-filters', JSON.stringify(merged));
+  }, [flightFilters]);
+
   const [animIntensity, setAnimIntensity] = useState(TWEAK_DEFAULTS.animationIntensity);
   // Auto-rotate. Starts on every load, any interaction flips it off, only
   // the toolbar rotate button turns it back on. Re-enabling zooms the globe
@@ -1257,8 +1317,19 @@ function App() {
         if (e.closedTime != null && e.closedTime < cutoff) return false;
         return true;
       }),
+      // Type filters — hide a vessel/aircraft whose category toggle is
+      // explicitly off. Unknown/empty category falls back to 'other'
+      // (ships) or bucket-by-altitude (flights).
+      ships: (data.ships || []).filter(s => {
+        const cat = s.category || 'other';
+        return shipFilters[cat] !== false;
+      }),
+      flights: (data.flights || []).filter(f => {
+        const b = flightBucket(f);
+        return flightFilters[b] !== false;
+      }),
     };
-  }, [data, nowCursor, seismicMin]);
+  }, [data, nowCursor, seismicMin, shipFilters, flightFilters]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden">
@@ -1325,7 +1396,10 @@ function App() {
               off-screen; on sm+ they detach to the right via the outer flex. */}
           <div className="flex items-center gap-1.5 sm:hidden">
             <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
-            <LayersPopover layers={layers} setLayers={setLayers} theme={theme} seismicMin={seismicMin} setSeismicMin={setSeismicMin}/>
+            <LayersPopover layers={layers} setLayers={setLayers} theme={theme}
+  seismicMin={seismicMin} setSeismicMin={setSeismicMin}
+  shipFilters={shipFilters} setShipFilters={setShipFilters}
+  flightFilters={flightFilters} setFlightFilters={setFlightFilters}/>
             <button
               onClick={() => toggleAutoRotate()}
               title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
@@ -1348,7 +1422,10 @@ function App() {
         {/* Desktop action cluster (hidden on mobile — duplicated above) */}
         <div className="hidden sm:flex items-center gap-2 pointer-events-auto order-3">
           <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
-          <LayersPopover layers={layers} setLayers={setLayers} theme={theme} seismicMin={seismicMin} setSeismicMin={setSeismicMin}/>
+          <LayersPopover layers={layers} setLayers={setLayers} theme={theme}
+  seismicMin={seismicMin} setSeismicMin={setSeismicMin}
+  shipFilters={shipFilters} setShipFilters={setShipFilters}
+  flightFilters={flightFilters} setFlightFilters={setFlightFilters}/>
           <button
             onClick={() => toggleAutoRotate()}
             title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
