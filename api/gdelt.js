@@ -115,6 +115,27 @@ async function loadHotspots() {
 
 export default async function handler(req, res) {
   try {
+    const url = new URL(req.url, 'http://x');
+    if (url.searchParams.get('debug') === '1') {
+      const eventsUrl = await latestEventsUrl();
+      const resp = await fetch(eventsUrl);
+      const ab = await resp.arrayBuffer();
+      const csv = unzipFirst(Buffer.from(ab)).toString('utf8');
+      const rows = csv.split('\n').filter(Boolean);
+      const first = rows[0]?.split('\t');
+      const geocoded = rows.filter(r => {
+        const f = r.split('\t');
+        return f.length >= 59 && isFinite(parseFloat(f[54])) && isFinite(parseFloat(f[55]));
+      }).length;
+      return res.status(200).json({
+        eventsUrl,
+        csvBytes: csv.length,
+        rows: rows.length,
+        firstColCount: first?.length,
+        firstSample: first?.slice(0, 5),
+        geocoded,
+      });
+    }
     const now = Date.now();
     if (!cached || now - cachedAt > TTL_MS) {
       await loadHotspots();
@@ -123,6 +144,6 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
     return res.status(200).json(cached);
   } catch (err) {
-    return res.status(502).json({ error: 'gdelt-failed', message: String(err) });
+    return res.status(502).json({ error: 'gdelt-failed', message: String(err), stack: String(err?.stack || '').slice(0, 500) });
   }
 }
