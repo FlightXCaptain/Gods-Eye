@@ -1847,6 +1847,52 @@ function Globe({
         octx.restore();
       }
 
+      // GDELT news hotspots. Each event is a single geocoded news
+      // article cluster, colored by CAMEO QuadClass (1=verbal coop
+      // green, 2=material coop sky, 3=verbal conflict amber, 4=material
+      // conflict red) and sized by article mentions. LOD-thins with a
+      // 0.4°–1.2° cell depending on zoom so dense conflict regions
+      // don't stack into solid blobs.
+      if (layers.news && Array.isArray(data.news) && data.news.length) {
+        const quadColor = (q) =>
+          q === 1 ? '#22c55e' :   // verbal cooperation — green
+          q === 2 ? '#0ea5e9' :   // material cooperation — sky
+          q === 3 ? '#f59e0b' :   // verbal conflict — amber
+          q === 4 ? '#ef4444' :   // material conflict — red
+                    '#a78bfa';    // unknown — purple
+        const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.5 : 1.2;
+        const cell = new Map();
+        for (const n of data.news) {
+          if (!visibleOn(projection, n.lon, n.lat)) continue;
+          if (cellDeg === 0) {
+            cell.set(n.id, n);
+            continue;
+          }
+          const key = Math.round(n.lon / cellDeg) + '|' + Math.round(n.lat / cellDeg) + '|' + n.quad;
+          const prev = cell.get(key);
+          // Keep the record with the most mentions in each cell — closest
+          // proxy to "most-covered story in this area".
+          if (!prev || (n.mentions || 1) > (prev.mentions || 1)) cell.set(key, n);
+        }
+        octx.save();
+        for (const n of cell.values()) {
+          const pt = projection([n.lon, n.lat]); if (!pt) continue;
+          const col = quadColor(n.quad);
+          // Size bumps with log(mentions) so a story with 100 mentions
+          // is only ~2× the visible size of a single-mention event.
+          const r = 1.2 + Math.min(3.2, Math.log10(1 + (n.mentions || 1)));
+          // Opacity tracks |tone| so a boring story fades while a
+          // polarised one pops. Clamp to keep background cells visible.
+          const alpha = Math.min(0.9, 0.35 + Math.min(1, Math.abs(n.tone || 0) / 6) * 0.5);
+          octx.fillStyle = col + Math.round(alpha * 255).toString(16).padStart(2, '0');
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], r, 0, Math.PI * 2);
+          octx.fill();
+          pushHit(pt[0], pt[1], Math.max(5, r + 1.5), 'news', n);
+        }
+        octx.restore();
+      }
+
       // Internet outages (Cloudflare Radar). Pulsing ring at the outage
       // country's polygon centroid (from Natural Earth, already loaded for
       // hit-testing). Ongoing outages pulse brighter; resolved ones render
@@ -2595,6 +2641,9 @@ function Globe({
           )}
           {hover._layer === 'plant' && (
             <span>{hover.name}{hover.capacity ? ` · ${Math.round(hover.capacity)} MW` : ''}{hover.fuel ? ` · ${hover.fuel.toLowerCase()}` : ''}</span>
+          )}
+          {hover._layer === 'news' && (
+            <span>{hover.place || 'Unlocated'} · {hover.mentions || 1}× mentions · tone {hover.tone?.toFixed?.(1) || 0}</span>
           )}
           {hover._layer === 'fire' && (
             <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>

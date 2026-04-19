@@ -368,6 +368,23 @@ async function fetchPowerPlants() {
   return Array.isArray(j) ? j : [];
 }
 
+// GDELT 2.0 news hotspots. Latest 15-minute events file, geocoded.
+// Goes through /api/gdelt proxy: GDELT rate-limits direct requests and
+// the raw feed is tab-separated-CSV-inside-a-zip, neither of which the
+// browser can handle cleanly.
+async function fetchNewsHotspots() {
+  const j = await safeFetch('/api/gdelt');
+  if (!Array.isArray(j)) return [];
+  return j.map(e => ({
+    ...e,
+    kind: 'news',
+    // Unify time field with other feeds (numeric ms).
+    time: e.dateAdded ? Date.parse(
+      e.dateAdded.replace(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3T$4:$5:$6Z')
+    ) : Date.now(),
+  }));
+}
+
 async function fetchKp() {
   const j = await safeFetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json');
   if (!Array.isArray(j)) return null;
@@ -548,6 +565,6 @@ function propagateSats(tleList, when) {
 Object.assign(window, {
   fetchQuakes, fetchISS, fetchFlights, fetchEONET, fetchNHC, fetchKp, fetchAurora,
   fetchTsunamis, fetchInternetOutages, fetchSubmarineCables, fetchNuclearReactors,
-  fetchPowerPlants, fetchSatellites, propagateSats, loadSatcat,
+  fetchPowerPlants, fetchNewsHotspots, fetchSatellites, propagateSats, loadSatcat,
   subscribeWikiEdits, COUNTRY_POINTS,
 });
