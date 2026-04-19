@@ -337,6 +337,7 @@ function Globe({
   const targetScaleRef = useRef(scaleRef.current);
   const dirtyBase = useRef(true);
   const hoverRef = useRef(null);
+  const hoverAppliedRef = useRef(null); // mirrors the last value pushed into React state so the tick-loop compare avoids tearing down the RAF on every mousemove
   const [hover, setHover] = useState(null);
   const landRef = useRef(null);
   const gridRef = useRef(null);
@@ -1040,14 +1041,33 @@ function Globe({
     return null;
   }
 
+  // Hemisphere visibility test, hot-pathed because it's called O(entities)
+  // per frame across every layer. Old implementation did proj([lon,lat]),
+  // proj.rotate(), and d3.geoDistance(...) on every call — a dozen trig
+  // ops and two function hops each.
+  //
+  // Rotation is stable within a frame, so we cache the center-of-globe
+  // unit vector keyed on the rotation tuple, then the per-call cost
+  // collapses to two cos/sin + three muls + a dot-product compare
+  // (point is on the front hemisphere iff point·center > 0).
   function visibleOn(proj, lon, lat) {
-    const pt = proj([lon, lat]);
-    if (!pt) return false;
-    // geoOrthographic returns null for back hemisphere due to clipAngle but only for paths; for points it still returns coords. Check via geoDistance.
     const rot = proj.rotate();
-    const center = [-rot[0], -rot[1]];
-    const d = d3.geoDistance([lon,lat], center);
-    return d < Math.PI/2;
+    if (visibleOn._rotX !== rot[0] || visibleOn._rotY !== rot[1]) {
+      visibleOn._rotX = rot[0];
+      visibleOn._rotY = rot[1];
+      const cLonR = -rot[0] * Math.PI / 180;
+      const cLatR = -rot[1] * Math.PI / 180;
+      const cCosLat = Math.cos(cLatR);
+      visibleOn._cx = cCosLat * Math.cos(cLonR);
+      visibleOn._cy = cCosLat * Math.sin(cLonR);
+      visibleOn._cz = Math.sin(cLatR);
+    }
+    const latR = lat * Math.PI / 180;
+    const lonR = lon * Math.PI / 180;
+    const cL = Math.cos(latR);
+    return (cL * Math.cos(lonR) * visibleOn._cx
+          + cL * Math.sin(lonR) * visibleOn._cy
+          + Math.sin(latR) * visibleOn._cz) > 0;
   }
 
   // Project a point "at altitude" — offset radially outward from the globe center
@@ -1380,25 +1400,30 @@ function Globe({
           return [uu, vv];
         };
 
-        // Only hard-reset particle prev-coords on *big* user pans (>0.5°
-        // lat/lon or noticeable scale change). Auto-rotate advances about
-        // 0.07°/frame — far below this — so we don't fight the animation
-        // there. Individual frame drift of ~1-2px under auto-rotate is
-        // imperceptible and the fade-clear cleans up any staleness.
+        // Hard-reset particle prev-coords on *big* frame-to-frame jumps
+        // (user pan fling, sudden zoom). The previous version only
+        // updated windViewRef when a reset fired, so auto-rotate's
+        // steady 4°/s drift accumulated until it crossed the 0.6°
+        // threshold ~7 times per second — every reset blanked all
+        // particle trails for one frame, producing the "wind is
+        // flashing" artifact. Updating the view snapshot every frame
+        // converts the check into frame-delta and the threshold only
+        // trips on genuine sudden moves.
         const view = windViewRef.current;
         const rNow = rotRef.current, sNow = scaleRef.current;
-        const moved = !view
-          || Math.abs(view[0] - rNow[0]) > 0.6
-          || Math.abs(view[1] - rNow[1]) > 0.6
-          || Math.abs(view[2] - sNow) > 2.0;
-        if (moved) {
-          const particles = windParticlesRef.current;
-          for (let i = 0; i < particles.length; i++) {
-            particles[i].prevX = null;
-            particles[i].prevY = null;
+        if (view) {
+          const dLon = Math.abs(view[0] - rNow[0]);
+          const dLat = Math.abs(view[1] - rNow[1]);
+          const dSc  = Math.abs(view[2] - sNow);
+          if (dLon > 1.5 || dLat > 1.5 || dSc > 4.0) {
+            const particles = windParticlesRef.current;
+            for (let i = 0; i < particles.length; i++) {
+              particles[i].prevX = null;
+              particles[i].prevY = null;
+            }
           }
-          windViewRef.current = [rNow[0], rNow[1], sNow];
         }
+        windViewRef.current = [rNow[0], rNow[1], sNow];
         wctx.save();
         wctx.globalCompositeOperation = 'destination-out';
         wctx.fillStyle = `rgba(0,0,0,${isDarkW ? 0.025 : 0.04})`;
@@ -1419,14 +1444,17 @@ function Globe({
         // visible motion and 25 m/s isn't a blur. Direction vector is
         // preserved; only the magnitude is remapped.
         //
-        //   effective motion = direction × sqrt(speed + 0.5) × SCALE
-        //     1 m/s  → 1.22 units
-        //    10 m/s  → 3.24 units
-        //    25 m/s  → 5.05 units
+        //   effective motion = direction × sqrt(speed + 0.5) × SCALE × dt
         //
-        // SCALE of 0.025 puts typical jet-stream flow at roughly 5°/s
-        // traverse — quick enough to read as flow, slow enough to track.
-        const SCALE = 0.025;
+        // SCALE_PER_SEC is calibrated so 60-fps behaviour matches the old
+        // frame-scaled constant while also working correctly on 120 Hz
+        // displays (where the previous formula made particles fly 2× too
+        // fast). Dropped slightly vs the old 1.5 effective to address
+        // "wind feels too fast" feedback.
+        const SCALE_PER_SEC = 1.0;
+        // Clamp dt at frame-stall boundaries so a dropped-frame pause
+        // doesn't launch every particle 5° in one step.
+        const windDt = Math.min(0.1, frameDt || 0.0167);
         const particles = windParticlesRef.current;
         for (let i = 0; i < particles.length; i++) {
           const p = particles[i];
@@ -1449,8 +1477,9 @@ function Globe({
           // Advance in degrees. Lon needs cos(lat) correction.
           const latRad = p.lat * Math.PI / 180;
           const cosLat = Math.max(0.05, Math.cos(latRad));
-          p.lat += dirY * visMag * SCALE;
-          p.lon += (dirX * visMag * SCALE) / cosLat;
+          const step = visMag * SCALE_PER_SEC * windDt;
+          p.lat += dirY * step;
+          p.lon += (dirX * step) / cosLat;
           if (p.lon > 180) p.lon -= 360;
           if (p.lon < -180) p.lon += 360;
 
@@ -1497,17 +1526,21 @@ function Globe({
           return [uu, vv];
         };
 
+        // Same frame-delta pattern as the wind block — update the view
+        // snapshot every frame so auto-rotate drift can't accumulate into
+        // a spurious reset.
         const oview = oceanViewRef.current;
         const rNow = rotRef.current, sNow = scaleRef.current;
-        const omoved = !oview
-          || Math.abs(oview[0] - rNow[0]) > 0.6
-          || Math.abs(oview[1] - rNow[1]) > 0.6
-          || Math.abs(oview[2] - sNow) > 2.0;
-        if (omoved) {
-          const ps = oceanParticlesRef.current;
-          for (let i = 0; i < ps.length; i++) { ps[i].prevX = null; ps[i].prevY = null; }
-          oceanViewRef.current = [rNow[0], rNow[1], sNow];
+        if (oview) {
+          const dLon = Math.abs(oview[0] - rNow[0]);
+          const dLat = Math.abs(oview[1] - rNow[1]);
+          const dSc  = Math.abs(oview[2] - sNow);
+          if (dLon > 1.5 || dLat > 1.5 || dSc > 4.0) {
+            const ps = oceanParticlesRef.current;
+            for (let i = 0; i < ps.length; i++) { ps[i].prevX = null; ps[i].prevY = null; }
+          }
         }
+        oceanViewRef.current = [rNow[0], rNow[1], sNow];
         // Skip the fade-clear if the wind layer already did it this frame.
         if (!layers.wind) {
           wctx.save();
@@ -1528,9 +1561,10 @@ function Globe({
           return `hsla(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%, ${alpha})`;
         };
 
-        // Ocean currents are ~10-20× slower than wind, so to keep visible
-        // motion comparable we scale ~15× larger than WIND's 0.025.
-        const OCEAN_SCALE = 0.35;
+        // Ocean currents are ~10-20× slower than wind so the per-second
+        // constant is much larger. Same frame-rate independence as wind.
+        const OCEAN_SCALE_PER_SEC = 14.0;
+        const oceanDt = Math.min(0.1, frameDt || 0.0167);
         const particles = oceanParticlesRef.current;
         for (let i = 0; i < particles.length; i++) {
           const p = particles[i];
@@ -1554,8 +1588,9 @@ function Globe({
           const dirX = uu / speed, dirY = vv / speed;
           const latRad = p.lat * Math.PI / 180;
           const cosLat = Math.max(0.05, Math.cos(latRad));
-          p.lat += dirY * speed * OCEAN_SCALE;
-          p.lon += (dirX * speed * OCEAN_SCALE) / cosLat;
+          const step = speed * OCEAN_SCALE_PER_SEC * oceanDt;
+          p.lat += dirY * step;
+          p.lon += (dirX * step) / cosLat;
           if (p.lon > 180) p.lon -= 360;
           if (p.lon < -180) p.lon += 360;
           if (!visibleOn(projection, p.lon, p.lat)) { p.prevX = null; p.prevY = null; continue; }
@@ -2721,14 +2756,22 @@ function Globe({
         }
       }
 
-      // Hover
-      if (hoverRef.current !== hover) setHover(hoverRef.current);
+      // Hover — compare the live ref to the last value we pushed into React
+      // state. Using React state in the dep list here caused the entire RAF
+      // loop to tear down and re-create on every mousemove, which was the
+      // single biggest perf regression after the layer additions. Ref-to-ref
+      // compare keeps the loop stable, and setHover still fires only when
+      // the hover actually changes so the tooltip component doesn't churn.
+      if (hoverRef.current !== hoverAppliedRef.current) {
+        hoverAppliedRef.current = hoverRef.current;
+        setHover(hoverRef.current);
+      }
 
       raf = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [width, height, theme, data, projection, layers, nowCursor, animationIntensity, focusTarget, hover]);
+  }, [width, height, theme, data, projection, layers, nowCursor, animationIntensity, focusTarget]);
 
   return (
     <div ref={wrapRef} className="grabbable select-none" style={{ position:'relative', width, height, touchAction:'none' }}>
