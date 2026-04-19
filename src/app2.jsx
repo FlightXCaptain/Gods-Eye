@@ -314,6 +314,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['iss','ISS',         'iss',     '#f43f5e'],
     ['quakes','Seismic',  'quake',   '#fb923c'],
     ['cyclones','Tropical cyclones', 'storm', '#f97316'],
+    ['outages','Internet outages', 'bolt', '#ef4444'],
     ['events','Natural events', 'fire', '#ef4444'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
@@ -509,6 +510,7 @@ function Dossier({ item, onClose }) {
               : layer === 'quake' ? 'Seismic'
               : layer === 'event' ? 'Natural'
               : layer === 'cyclone' ? 'Cyclone'
+              : layer === 'outage' ? 'Network'
               : layer === 'fire' ? 'Thermal'
               : layer === 'sat' ? 'Satellite'
               : layer === 'city' ? 'City'
@@ -590,6 +592,22 @@ function Dossier({ item, onClose }) {
           <KV k="Type" v={item.category}/>
           <KV k="Updated" v={fmtTime(item.time)}/>
           {item.link && <a href={item.link} target="_blank" className="text-xs text-accent-500 underline">NASA EONET →</a>}
+        </>}
+        {layer === 'outage' && <>
+          <div className="text-lg">{item.locations?.[0]?.name || 'Internet outage'}</div>
+          <div className="text-sm opacity-70">Cloudflare Radar {item.ongoing ? '· ongoing' : '· resolved'}</div>
+          {item.description && <div className="text-sm">{item.description}</div>}
+          {item.cause && <KV k="Cause" v={item.cause.replace(/_/g, ' ').toLowerCase()}/>}
+          {item.outageType && <KV k="Scope" v={item.outageType.replace(/_/g, ' ').toLowerCase()}/>}
+          {item.locations?.length > 1 && (
+            <KV k="Locations" v={item.locations.map(l => l.name).join(', ')}/>
+          )}
+          {item.asns?.length > 0 && (
+            <KV k="Networks" v={item.asns.slice(0, 3).map(n => `${n.name || 'AS'+n.asn}`).join(', ') + (item.asns.length > 3 ? ` +${item.asns.length - 3}` : '')}/>
+          )}
+          <KV k="Started" v={fmtTime(item.startTime)}/>
+          {item.endTime && <KV k="Ended" v={fmtTime(item.endTime)}/>}
+          {item.linkedUrl && <a href={item.linkedUrl} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Radar post →</a>}
         </>}
         {layer === 'cyclone' && <>
           <div className="text-lg">{item.classification ? `${item.classification} ` : ''}{item.name}</div>
@@ -955,7 +973,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
@@ -1031,6 +1049,7 @@ function App() {
         case 'quake':   return `M${typeof it.mag === 'number' ? it.mag.toFixed(1) : '?'} · ${it.place || 'Earthquake'}`;
         case 'event':   return it.title || 'Event';
         case 'cyclone': return (it.classification ? `${it.classification} ` : '') + (it.name || 'Cyclone');
+        case 'outage':  return (it.locations?.[0]?.name || 'Internet outage') + (it.ongoing ? ' · ongoing' : '');
         default:        return 'Target';
       }
     };
@@ -1064,7 +1083,7 @@ function App() {
   }, []);
 
   // Data
-  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], cyclones:[], iss:null, sats:[], satTLEs:[], ships:[] });
+  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], cyclones:[], outages:[], iss:null, sats:[], satTLEs:[], ships:[] });
   const [kp, setKp] = useState(null);
   const [ticker, setTicker] = useState([]);
 
@@ -1132,11 +1151,11 @@ function App() {
   useEffect(() => {
     let alive = true;
     const loadAll = async () => {
-      const [q,e,k,a,t,cy] = await Promise.all([
-        fetchQuakes(), fetchEONET(), fetchKp(), fetchAurora(), fetchTsunamis(), fetchNHC(),
+      const [q,e,k,a,t,cy,ou] = await Promise.all([
+        fetchQuakes(), fetchEONET(), fetchKp(), fetchAurora(), fetchTsunamis(), fetchNHC(), fetchInternetOutages(),
       ]);
       if (!alive) return;
-      setData(d => ({...d, quakes:q, events:e, aurora:a, tsunamis:t, cyclones:cy }));
+      setData(d => ({...d, quakes:q, events:e, aurora:a, tsunamis:t, cyclones:cy, outages:ou }));
       setKp(k);
       // Push to live feed
       pushFeed((q||[]).slice(0,15).map(qk => ({
@@ -1158,6 +1177,15 @@ function App() {
         sub: c.intensityKt ? `${Math.round(c.intensityKt)} kt${c.pressureMb ? ` · ${Math.round(c.pressureMb)} mb` : ''}` : (c.binNumber || ''),
         _item: { ...c, _layer:'cyclone' },
         coords: [c.lon, c.lat],
+      })));
+      pushFeed((ou||[]).slice(0,15).map(o => ({
+        key: 'ou:'+o.id, layer:'outage', time: o.time || Date.now(),
+        title: o.locations?.[0]?.name || 'Internet outage',
+        sub: (o.ongoing ? 'ongoing · ' : '') + (o.description || o.cause || 'outage'),
+        _item: { ...o, _layer:'outage' },
+        // No coords on the outage itself; click routes to the dossier via
+        // the _item payload, which the click-handler fans out over the
+        // country centroid anyway.
       })));
       if (k) pushFeed([{
         key: 'kp:'+k.time, layer:'kp', time: new Date(k.time).getTime() || Date.now(),

@@ -396,6 +396,7 @@ function Globe({
   const lastBaseRedrawMsRef = useRef(0);
   const countriesRef = useRef(null);        // internal country borders (mesh) — drawing only
   const countryFeaturesRef = useRef(null);  // NE admin_0 features — hit-test (has names)
+  const countryCentroidsRef = useRef(null); // iso2 → [lon,lat] centroid, lazily built from countryFeaturesRef
   const statesRef = useRef(null);           // NE admin_1 state/province lines (zoom ≥ 2.5)
   const riversRef = useRef(null);           // Natural Earth rivers 50m
   const lakesRef = useRef(null);            // Natural Earth lakes 50m
@@ -1740,6 +1741,89 @@ function Globe({
         }
       }
 
+      // Internet outages (Cloudflare Radar). Pulsing ring at the outage
+      // country's polygon centroid (from Natural Earth, already loaded for
+      // hit-testing). Ongoing outages pulse brighter; resolved ones render
+      // as a dim static ring. Multiple outages in the same country stack
+      // horizontally so each remains clickable.
+      if (layers.outages !== false && Array.isArray(data.outages) && data.outages.length) {
+        // Build ISO2 → centroid map lazily. Natural Earth's polygon
+        // features give us a centroid that respects the real country
+        // shape (matters for elongated or multi-part countries like USA,
+        // Russia, Indonesia).
+        if (!countryCentroidsRef.current && countryFeaturesRef.current) {
+          const m = new Map();
+          for (const f of countryFeaturesRef.current) {
+            const p = f.properties || {};
+            const code = p.ISO_A2 || p.iso_a2;
+            if (!code || code === '-99') continue;
+            try {
+              const c = d3.geoCentroid(f);
+              if (isFinite(c[0]) && isFinite(c[1])) m.set(code.toUpperCase(), c);
+            } catch {}
+          }
+          countryCentroidsRef.current = m;
+        }
+        const centroids = countryCentroidsRef.current;
+        if (centroids) {
+          // Group outages by anchor so we can fan them out when a country
+          // has several simultaneous incidents (Sudan, Yemen etc. often
+          // carry 3-5 ongoing).
+          const byAnchor = new Map();
+          for (const o of data.outages) {
+            const code = (o.anchor || '').toUpperCase();
+            if (!code) continue;
+            const c = centroids.get(code);
+            if (!c) continue;
+            if (!visibleOn(projection, c[0], c[1])) continue;
+            const arr = byAnchor.get(code) || [];
+            arr.push(o);
+            byAnchor.set(code, arr);
+          }
+          const pulse = (Math.sin(now / 600) + 1) * 0.5; // 0..1, ~1 s period
+          for (const [code, list] of byAnchor) {
+            const c = centroids.get(code);
+            const pt = projection([c[0], c[1]]);
+            if (!pt) continue;
+            // Fan multiple outages around the centroid so they remain
+            // individually clickable.
+            const span = Math.min(24, list.length * 10);
+            for (let i = 0; i < list.length; i++) {
+              const o = list[i];
+              const off = list.length === 1 ? 0 : (i / (list.length - 1) - 0.5) * span;
+              const px = pt[0] + off, py = pt[1];
+              // Cause-specific hue. Most common: GOVERNMENT_DIRECTED (red),
+              // WEATHER (amber), CABLE (violet), POWER_OUTAGE (orange),
+              // TECHNICAL_PROBLEM (slate). Default: red.
+              const causeColor =
+                o.cause === 'WEATHER' ? '#f59e0b' :
+                o.cause === 'CABLE' ? '#a78bfa' :
+                o.cause === 'POWER_OUTAGE' ? '#fb923c' :
+                o.cause === 'TECHNICAL_PROBLEM' ? '#94a3b8' :
+                '#ef4444';
+              // Core dot
+              octx.fillStyle = causeColor;
+              octx.beginPath();
+              octx.arc(px, py, 2.3, 0, Math.PI * 2);
+              octx.fill();
+              // Pulsing halo — ongoing incidents only. Resolved incidents
+              // still render as a small static dot so the historical
+              // context reads clearly when scrubbing the feed.
+              if (o.ongoing) {
+                const r = 3 + pulse * 7;
+                const a = (1 - pulse) * 0.55;
+                octx.strokeStyle = causeColor + Math.round(a * 255).toString(16).padStart(2, '0');
+                octx.lineWidth = 1.1;
+                octx.beginPath();
+                octx.arc(px, py, r, 0, Math.PI * 2);
+                octx.stroke();
+              }
+              pushHit(px, py, 7, 'outage', o);
+            }
+          }
+        }
+      }
+
       // Lightning strikes — quick bright flashes that fade over ~3 s.
       // Rendered on the overlay (which redraws every frame) so the fade
       // animation reads correctly. No hit regions — strikes are too
@@ -2388,6 +2472,9 @@ function Globe({
           {hover._layer === 'event' && <span>{hover.category} · {hover.title}</span>}
           {hover._layer === 'cyclone' && (
             <span>{hover.classification ? `${hover.classification} ` : ''}{hover.name}{hover.intensityKt ? ` · ${Math.round(hover.intensityKt)} kt` : ''}{hover.pressureMb ? ` · ${Math.round(hover.pressureMb)} mb` : ''}</span>
+          )}
+          {hover._layer === 'outage' && (
+            <span>{hover.ongoing ? 'Ongoing · ' : 'Resolved · '}{hover.locations?.[0]?.name || 'Outage'}{hover.cause ? ` · ${hover.cause.replace(/_/g, ' ').toLowerCase()}` : ''}</span>
           )}
           {hover._layer === 'fire' && (
             <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>
