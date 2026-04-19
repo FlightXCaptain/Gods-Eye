@@ -10,8 +10,8 @@
      window.openCameraPlayer(camera)
      window.closeCameraPlayer()
 
-   Modal is 960×540 (16:9), centred, glass-strong card matching the dive-in
-   modal styling. ESC / backdrop / X close it.
+   Modal is 960×540 (16:9), centred, glass-strong card. ESC / backdrop / X
+   close it.
 
    HLS is lazy-loaded from unpkg on first use so we don't pay the ~100 kB
    cost on globe load — only when someone clicks an HLS cam. */
