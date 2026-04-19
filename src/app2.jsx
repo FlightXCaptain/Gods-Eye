@@ -1332,13 +1332,6 @@ function App() {
         </div>
       </div>
 
-      {/* Help hint — desktop only; gets in the way on tablets/phones */}
-      <div className="hidden lg:block absolute bottom-4 right-4 z-10 pointer-events-none">
-        <div className="glass rounded-full px-3 py-1.5 text-[10px] font-mono opacity-60 tracking-wider whitespace-nowrap">
-          <kbd>/</kbd> locate · <kbd>drag</kbd> rotate · <kbd>scroll</kbd> zoom · <kbd>space</kbd> play
-        </div>
-      </div>
-
       {tweaks && (
         <div className="fixed bottom-24 left-4 z-50 glass-strong rounded-2xl p-3 w-60">
           <div className="text-[10px] uppercase font-mono opacity-50 mb-2 tracking-wider">Tweaks</div>
