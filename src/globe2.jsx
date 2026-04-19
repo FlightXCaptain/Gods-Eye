@@ -1235,26 +1235,39 @@ function Globe({
         }
       }
 
-      // Cameras — static point layer from /api/cameras. Far fewer entries
-      // than quakes/events so no LOD decimation; just colour by category.
+      // Cameras — same LOD strategy as quakes/events. With Windy attached
+      // we can receive 20k+ entries; at low zoom Europe/California alone
+      // would be an opaque dogpile without decimation. Spatial binning
+      // keeps one marker per bin at a given zoom, collapsing clusters to
+      // a single "here there be cameras" dot.
       if (layers.cameras && camerasRef.current && camerasRef.current.length) {
         const camColor = (cat) => {
           switch (cat) {
-            case 'volcano':  return '#f97316';   // orange, matches EONET volcano
-            case 'park':     return '#10b981';   // emerald
-            case 'wildlife': return '#14b8a6';   // teal
+            case 'volcano':  return '#f97316';
+            case 'park':     return '#10b981';
+            case 'wildlife': return '#14b8a6';
             case 'city':     return isDark ? '#e5e7eb' : '#1f2937';
-            case 'airport':  return '#7dd3fc';   // sky, matches flights
-            default:         return '#f472b6';   // pink fallback
+            case 'airport':  return '#7dd3fc';
+            default:         return '#f472b6';
           }
         };
-        const camSize = zoom < 1.5 ? 8 : zoom < 3 ? 10 : 12;
+        const cPts = [];
         for (const cam of camerasRef.current) {
           if (typeof cam.lat !== 'number' || typeof cam.lon !== 'number') continue;
           if (!visibleOn(projection, cam.lon, cam.lat)) continue;
           const pt = projection([cam.lon, cam.lat]); if (!pt) continue;
-          iconCamera(octx, pt[0], pt[1], camSize, camColor(cam.category));
-          pushHit(pt[0], pt[1], camSize * 0.6, 'camera', cam);
+          cPts.push({ px: pt[0], py: pt[1], cam });
+        }
+        // Larger cell than events so 20k cams still render readably at zoom 1.
+        const lod = classifyLOD(cPts, Math.max(22, 34 / zoom));
+        for (let i = 0; i < cPts.length; i++) {
+          const { px, py, cam } = cPts[i];
+          const { mode } = lod[i];
+          const col = camColor(cam.category);
+          if (mode === 'full')         iconCamera(octx, px, py, 12, col);
+          else if (mode === 'compact') iconCamera(octx, px, py, 8,  col);
+          else                         iconCamera(octx, px, py, 5,  col);
+          pushHit(px, py, mode === 'full' ? 8 : 6, 'camera', cam);
         }
       }
 
@@ -1543,6 +1556,18 @@ function Globe({
           })()}
           {hover._layer === 'quake' && <span>M{hover.mag?.toFixed(1)} · {hover.place}</span>}
           {hover._layer === 'event' && <span>{hover.category} · {hover.title}</span>}
+          {hover._layer === 'camera' && (() => {
+            const camCategoryColor = {
+              volcano:'#f97316', park:'#10b981', wildlife:'#14b8a6',
+              airport:'#7dd3fc', city:'#e5e7eb', other:'#f472b6',
+            };
+            const cat = hover.category || 'other';
+            const col = camCategoryColor[cat] || camCategoryColor.other;
+            return <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: col }}/>
+              <span>{hover.title}{hover.source ? ` · ${hover.source}` : ''}</span>
+            </span>;
+          })()}
           {hover._layer === 'tsunami' && <span>Tsunami · {hover.location || hover.country} {hover.year || ''}</span>}
           {hover._layer === 'city' && <span>{hover.name}{hover.country ? ` · ${hover.country}` : ''}</span>}
           {hover._layer === 'cluster' && <span>{hover.count} {hover.layer}{hover.count>1?'s':''} — click to zoom</span>}
