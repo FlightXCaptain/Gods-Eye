@@ -294,6 +294,16 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <path d="M10 3 A 5 5 0 1 0 10 11 A 4 4 0 1 1 10 3 Z" fill={color}/>
         </svg>
       );
+    case 'radiation':
+      // ISO trefoil: three 60° sectors at 90° intervals around a center dot.
+      return (
+        <svg {...props}>
+          <circle cx="7" cy="7" r="1.3" fill={color}/>
+          <path d="M7 2 A 5 5 0 0 1 11.33 4.5 L7 7 Z" fill={color}/>
+          <path d="M11.33 9.5 A 5 5 0 0 1 2.67 9.5 L7 7 Z" fill={color}/>
+          <path d="M2.67 4.5 A 5 5 0 0 1 7 2 L7 7 Z" fill={color}/>
+        </svg>
+      );
     case 'bolt':
       return (
         <svg {...props}>
@@ -316,6 +326,9 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['cyclones','Tropical cyclones', 'storm', '#f97316'],
     ['outages','Internet outages', 'bolt', '#ef4444'],
     ['events','Natural events', 'fire', '#ef4444'],
+    ['cables','Submarine cables', 'aurora', '#22d3ee'],
+    ['reactors','Nuclear reactors', 'radiation', '#22c55e'],
+    ['plants','Power plants', 'bolt', '#f59e0b'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
@@ -511,6 +524,8 @@ function Dossier({ item, onClose }) {
               : layer === 'event' ? 'Natural'
               : layer === 'cyclone' ? 'Cyclone'
               : layer === 'outage' ? 'Network'
+              : layer === 'reactor' ? 'Nuclear'
+              : layer === 'plant' ? 'Power'
               : layer === 'fire' ? 'Thermal'
               : layer === 'sat' ? 'Satellite'
               : layer === 'city' ? 'City'
@@ -592,6 +607,27 @@ function Dossier({ item, onClose }) {
           <KV k="Type" v={item.category}/>
           <KV k="Updated" v={fmtTime(item.time)}/>
           {item.link && <a href={item.link} target="_blank" className="text-xs text-accent-500 underline">NASA EONET →</a>}
+        </>}
+        {layer === 'reactor' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">{item.country}</div>
+          {item.status && <KV k="Status" v={item.status}/>}
+          {item.reactorType && <KV k="Type" v={item.reactorType}/>}
+          {item.capacity != null && <KV k="Net capacity" v={`${Math.round(item.capacity)} MWe`}/>}
+          {item.opFrom && <KV k="Operational" v={item.opFrom}/>}
+          {item.opTo && <KV k="Decommissioned" v={item.opTo}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <div className="text-xs opacity-50">GeoNuclearData / IAEA</div>
+        </>}
+        {layer === 'plant' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">{item.country}</div>
+          {item.fuel && <KV k="Fuel" v={item.fuel}/>}
+          {item.capacity != null && <KV k="Capacity" v={`${Math.round(item.capacity)} MW`}/>}
+          {item.year != null && <KV k="Commissioned" v={String(item.year)}/>}
+          {item.owner && <KV k="Owner" v={item.owner}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <div className="text-xs opacity-50">WRI Global Power Plant DB (≥100 MW)</div>
         </>}
         {layer === 'outage' && <>
           <div className="text-lg">{item.locations?.[0]?.name || 'Internet outage'}</div>
@@ -973,7 +1009,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
@@ -1050,6 +1086,8 @@ function App() {
         case 'event':   return it.title || 'Event';
         case 'cyclone': return (it.classification ? `${it.classification} ` : '') + (it.name || 'Cyclone');
         case 'outage':  return (it.locations?.[0]?.name || 'Internet outage') + (it.ongoing ? ' · ongoing' : '');
+        case 'reactor': return it.name || 'Reactor';
+        case 'plant':   return it.name || 'Power plant';
         default:        return 'Target';
       }
     };
@@ -1083,7 +1121,7 @@ function App() {
   }, []);
 
   // Data
-  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], cyclones:[], outages:[], iss:null, sats:[], satTLEs:[], ships:[] });
+  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], cyclones:[], outages:[], cables:[], reactors:[], plants:[], iss:null, sats:[], satTLEs:[], ships:[] });
   const [kp, setKp] = useState(null);
   const [ticker, setTicker] = useState([]);
 
@@ -1201,6 +1239,13 @@ function App() {
     };
     loadAll();
     const id = setInterval(loadAll, 90000);
+    // Static infrastructure layers — fetched once on mount. These are
+    // reference datasets (submarine cable routes, reactor fleet, power
+    // plant locations >100 MW) that change on a scale of months, so no
+    // point in refetching them with the 90-second live-data cycle.
+    fetchSubmarineCables().then(c => { if (alive) setData(d => ({ ...d, cables: c })); });
+    fetchNuclearReactors().then(r => { if (alive) setData(d => ({ ...d, reactors: r })); });
+    fetchPowerPlants().then(p => { if (alive) setData(d => ({ ...d, plants: p })); });
     return () => { alive = false; clearInterval(id); };
   }, []);
 

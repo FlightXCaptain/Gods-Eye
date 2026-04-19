@@ -1741,6 +1741,112 @@ function Globe({
         }
       }
 
+      // Submarine communications cables (TeleGeography). Drawn at low
+      // opacity on the overlay so the wireframe land stays dominant; the
+      // cable mesh reads as a subtle subsea network pattern. Rendered
+      // below the outage + reactor + plant dots so markers sit on top.
+      if (layers.cables && Array.isArray(data.cables) && data.cables.length) {
+        const cpath = d3.geoPath(projection, octx);
+        octx.save();
+        octx.lineWidth = 0.7;
+        // Group cables by color so we minimise state changes — there are
+        // ~560 cables but TeleGeography uses ~20 distinct route colors.
+        const byColor = new Map();
+        for (const c of data.cables) {
+          const arr = byColor.get(c.color) || [];
+          arr.push(c.geometry);
+          byColor.set(c.color, arr);
+        }
+        for (const [col, geoms] of byColor) {
+          octx.strokeStyle = col + (isDark ? '88' : 'aa');
+          octx.beginPath();
+          for (const g of geoms) cpath(g);
+          octx.stroke();
+        }
+        octx.restore();
+      }
+
+      // Nuclear reactors (GeoNuclearData). Color by operational status,
+      // size subtly scaled with net MWe. Always-visible (no LOD cluster)
+      // because the global fleet is only ~800 reactors.
+      if (layers.reactors && Array.isArray(data.reactors) && data.reactors.length) {
+        const statusColor = (s) => {
+          s = (s || '').toLowerCase();
+          if (s.includes('operational')) return '#22c55e';       // green
+          if (s.includes('construction')) return '#eab308';      // yellow
+          if (s.includes('planned')) return '#38bdf8';           // sky blue
+          if (s.includes('cancelled') || s.includes('suspended')) return '#94a3b8'; // slate
+          if (s.includes('shutdown') || s.includes('decommiss')) return '#71717a'; // zinc
+          return '#a78bfa';
+        };
+        octx.save();
+        for (const rx of data.reactors) {
+          if (!visibleOn(projection, rx.lon, rx.lat)) continue;
+          const pt = projection([rx.lon, rx.lat]); if (!pt) continue;
+          const r = 2 + Math.min(2.2, (rx.capacity || 0) / 900);
+          octx.fillStyle = statusColor(rx.status) + 'd0';
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], r, 0, Math.PI * 2);
+          octx.fill();
+          // Thin ring for operational reactors to lift them out of the
+          // background at low zoom.
+          if ((rx.status || '').toLowerCase().includes('operational')) {
+            octx.strokeStyle = '#22c55e';
+            octx.lineWidth = 0.6;
+            octx.stroke();
+          }
+          pushHit(pt[0], pt[1], Math.max(5, r + 2), 'reactor', rx);
+        }
+        octx.restore();
+      }
+
+      // Global power-plant fleet (WRI GPPD, pre-filtered to ≥100 MW).
+      // ~10 k plants globally, so we LOD-cluster at low zoom: at zoom <3
+      // we thin-render to one point per ~0.5° cell; at zoom ≥3 we draw
+      // everything in view. Color by primary fuel.
+      if (layers.plants && Array.isArray(data.plants) && data.plants.length) {
+        const fuelColor = (f) => {
+          f = (f || '').toLowerCase();
+          if (f === 'coal')                              return '#525252';  // zinc
+          if (f === 'gas')                               return '#f59e0b';  // amber
+          if (f === 'oil' || f === 'petcoke')            return '#78350f';  // brown
+          if (f === 'nuclear')                           return '#22c55e';  // green (matches reactor ops)
+          if (f === 'hydro')                             return '#0ea5e9';  // sky
+          if (f === 'wind')                              return '#a3e635';  // lime
+          if (f === 'solar')                             return '#facc15';  // yellow
+          if (f === 'biomass' || f === 'waste')          return '#65a30d';  // olive
+          if (f === 'geothermal')                        return '#f472b6';  // pink
+          if (f === 'wave and tidal' || f === 'storage') return '#38bdf8';  // cyan
+          return '#a78bfa';                                                 // purple fallback
+        };
+        // LOD: bucket cell size shrinks with zoom. One visible plant per
+        // cell — the highest-capacity one wins so the map always shows
+        // the most significant installation in a given region.
+        const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.6 : 1.5;
+        const cell = new Map();
+        for (const p of data.plants) {
+          if (!visibleOn(projection, p.lon, p.lat)) continue;
+          if (cellDeg === 0) {
+            cell.set(p.id, p);
+            continue;
+          }
+          const key = Math.round(p.lon / cellDeg) + '|' + Math.round(p.lat / cellDeg);
+          const prev = cell.get(key);
+          if (!prev || p.capacity > prev.capacity) cell.set(key, p);
+        }
+        octx.save();
+        for (const p of cell.values()) {
+          const pt = projection([p.lon, p.lat]); if (!pt) continue;
+          const r = 1.4 + Math.min(2.8, p.capacity / 1400);
+          octx.fillStyle = fuelColor(p.fuel) + 'cc';
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], r, 0, Math.PI * 2);
+          octx.fill();
+          pushHit(pt[0], pt[1], Math.max(5, r + 1.5), 'plant', p);
+        }
+        octx.restore();
+      }
+
       // Internet outages (Cloudflare Radar). Pulsing ring at the outage
       // country's polygon centroid (from Natural Earth, already loaded for
       // hit-testing). Ongoing outages pulse brighter; resolved ones render
@@ -2483,6 +2589,12 @@ function Globe({
           )}
           {hover._layer === 'outage' && (
             <span>{hover.ongoing ? 'Ongoing · ' : 'Resolved · '}{hover.locations?.[0]?.name || 'Outage'}{hover.cause ? ` · ${hover.cause.replace(/_/g, ' ').toLowerCase()}` : ''}</span>
+          )}
+          {hover._layer === 'reactor' && (
+            <span>{hover.name}{hover.capacity ? ` · ${Math.round(hover.capacity)} MWe` : ''}{hover.status ? ` · ${hover.status.toLowerCase()}` : ''}</span>
+          )}
+          {hover._layer === 'plant' && (
+            <span>{hover.name}{hover.capacity ? ` · ${Math.round(hover.capacity)} MW` : ''}{hover.fuel ? ` · ${hover.fuel.toLowerCase()}` : ''}</span>
           )}
           {hover._layer === 'fire' && (
             <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>
