@@ -1137,19 +1137,35 @@ function App() {
   }, []);
   const [tweaks, setTweaks] = useState(false);
 
-  // Point-event layers (seismic, natural events) render only items whose
-  // most-recent timestamp falls in the 24 h window ending at the cursor.
-  // Same rule at cursor=NOW (live) and cursor=anywhere-in-past (scrub), so
-  // "live" shows genuinely live stuff and scrubbing shows what was happening
-  // at that point a week ago. Previously the event filter used a 30-day
-  // window which meant the "live" view was polluted with weeks-old events.
+  // Point-event layers render with different semantics.
+  //
+  // Quakes: one-time events. A quake "happens" at quake.time — it's not
+  // ongoing. 24 h window centered on the cursor is right: live mode
+  // shows the last 24 h, scrub shows what was detected in the 24 h up
+  // to the cursor.
+  //
+  // EONET natural events: persistent. A wildfire starts on startTime and
+  // gets updated repeatedly until it's contained — event.time is only
+  // the LAST update. Filtering by time-within-24-h would drop active
+  // wildfires whose last position update was 25+ hours ago, which is
+  // exactly what made 200+ events in the ticker render as zero on the
+  // globe. Fix: show an event if its lifecycle overlaps the cursor —
+  // startTime <= cursor, AND the last update was within the fetch window
+  // (30 days) so we don't keep drawing events EONET itself has stopped
+  // tracking.
   const filteredData = useMemo(() => {
     const cutoff = nowCursor;
-    const start = cutoff - 24*3600*1000;
+    const quakeWindow = 24 * 3600 * 1000;
+    const eventWindow = 30 * 24 * 3600 * 1000;
     return {
       ...data,
-      quakes: (data.quakes||[]).filter(q => q.time <= cutoff && q.time >= start && (q.mag || 0) >= seismicMin),
-      events: (data.events||[]).filter(e => e.time <= cutoff && e.time >= start),
+      quakes: (data.quakes || []).filter(q =>
+        q.time <= cutoff && q.time >= cutoff - quakeWindow && (q.mag || 0) >= seismicMin
+      ),
+      events: (data.events || []).filter(e => {
+        const start = e.startTime || e.time;
+        return start <= cutoff && e.time >= cutoff - eventWindow;
+      }),
     };
   }, [data, nowCursor, seismicMin]);
 
