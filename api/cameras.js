@@ -88,9 +88,12 @@ function pushWindy(out, webcams) {
     const lon = w.location?.longitude;
     if (typeof lat !== 'number' || typeof lon !== 'number') continue;
     const webcamId = w.webcamId;
-    // Windy's public embed player. ?view=live prefers live video and falls
-    // back to latest frame / timelapse depending on what the cam exposes.
-    const embedUrl = `https://webcams.windy.com/webcams/public/embed/player/${webcamId}?view=live`;
+    // Windy's public embed player. The correct URL shape — discovered via
+    // the 400 error body — is query-param form: ?webcamId=…&playerType=….
+    // playerType must be one of [live, day, month, year, lifetime]. We use
+    // "live" so cams with a live stream play through; cams without one fall
+    // back gracefully to the most recent frame inside Windy's own player.
+    const embedUrl = `https://webcams.windy.com/webcams/public/embed/player?webcamId=${webcamId}&playerType=live`;
     out.push({
       id: 'windy-' + webcamId,
       title: w.title || 'Webcam',
