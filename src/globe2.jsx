@@ -339,7 +339,10 @@ function Globe({
   const hoverRef = useRef(null);
   const hoverAppliedRef = useRef(null); // mirrors the last value pushed into React state so the tick-loop compare avoids tearing down the RAF on every mousemove
   const [hover, setHover] = useState(null);
-  const landRef = useRef(null);
+  const landRef = useRef(null);      // active land feature (swapped per zoom/motion by the draw loop)
+  const landLowRef  = useRef(null);  // 110m  ~100 KB  — globe-view + during auto-rotate
+  const landMidRef  = useRef(null);  // 50m   ~700 KB — regional zoom stationary
+  const landHighRef = useRef(null);  // 10m   ~3 MB   — close zoom stationary (shows Malta / Guam / Caymans)
   const gridRef = useRef(null);
   // Motion trails. For each moving entity (keyed by stable ID) we keep the last
   // TRAIL_MAX lon/lat samples. Only pushed when the item has actually moved
@@ -565,21 +568,33 @@ function Globe({
   // detail layers stream in and trigger re-draws as they arrive.
   useEffect(() => {
     (async () => {
+      // Land base — load all three resolutions in parallel and pick per
+      // zoom in the draw loop. 10m has the island detail we want, but it's
+      // ~3 MB of coastline polygons — re-projecting the whole thing through
+      // orthographic on every basemap tick was what made auto-rotate lag
+      // and fps collapse. 110m is ~100 KB with <200 country polygons, so
+      // auto-rotate / globe-scale redraws stay cheap.
+      //
+      // 110m loads first (smallest) so the globe paints immediately;
+      // finer resolutions drop in and trigger progressively crisper
+      // redraws as they arrive.
+      gridRef.current = d3.geoGraticule().step([15,15])();
       try {
-        // 10m resolution — the next jump from 50m. 50m technically includes
-        // Malta, Guam etc. but represents them as 6–10 point polygons that
-        // render as invisible slivers at globe-scale zoom. 10m gives each
-        // small island a properly shaped coastline with enough points to
-        // actually read on screen, at the cost of ~3 MB on a one-time load.
-        // Cached by jsdelivr and by the browser after first visit, so the
-        // recurring cost is zero. Country hit-test stays at 50m because the
-        // richer Natural Earth property set (ISO, continent, pop, GDP) isn't
-        // available on the world-atlas variants.
-        const t = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-10m.json');
-        landRef.current = topojson.feature(t, t.objects.land);
-        gridRef.current = d3.geoGraticule().step([15,15])();
+        const t110 = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json');
+        landLowRef.current  = topojson.feature(t110, t110.objects.land);
+        landRef.current = landLowRef.current;
         dirtyBase.current = true;
-      } catch (e) { console.warn('land topo fail', e); }
+      } catch (e) { console.warn('land-110m fail', e); }
+      // Fire off 50m + 10m in parallel so the high-res tiers arrive as
+      // fast as the network allows without blocking the initial paint.
+      d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-50m.json').then(t50 => {
+        landMidRef.current = topojson.feature(t50, t50.objects.land);
+        dirtyBase.current = true;
+      }).catch(e => console.warn('land-50m fail', e));
+      d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-10m.json').then(t10 => {
+        landHighRef.current = topojson.feature(t10, t10.objects.land);
+        dirtyBase.current = true;
+      }).catch(e => console.warn('land-10m fail', e));
 
       // Countries — drawing uses topojson mesh (efficient dashed borders).
       try {
@@ -1266,9 +1281,20 @@ function Globe({
           bctx.lineWidth = 0.5; bctx.stroke();
         }
 
-        // Land — wireframe outline (the signature look)
-        if (landRef.current) {
-          bctx.beginPath(); path(landRef.current);
+        // Land — wireframe outline (the signature look). Pick the
+        // detail tier per zoom + motion state: 110m during auto-rotate
+        // or globe view (cheap, no stepping visible at that scale),
+        // 50m at regional zoom, 10m only when zoomed in and still so
+        // you can see Malta / Guam / Caymans coastlines. Fallbacks
+        // gracefully if a higher tier hasn't loaded yet.
+        const moving = autoRotate && !focusTarget;
+        const landTier =
+          moving || zoomB < 1.4 ? (landLowRef.current  || landMidRef.current || landHighRef.current) :
+          zoomB < 3             ? (landMidRef.current  || landLowRef.current || landHighRef.current) :
+                                   (landHighRef.current || landMidRef.current || landLowRef.current);
+        if (landTier) {
+          landRef.current = landTier;
+          bctx.beginPath(); path(landTier);
           bctx.strokeStyle = isDark ? 'rgba(244,63,94,0.55)' : 'rgba(244,63,94,0.75)';
           bctx.lineWidth = 0.9; bctx.stroke();
         }
