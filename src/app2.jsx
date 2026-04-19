@@ -426,6 +426,16 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                     </div>
                   ))}
                 </div>
+                {/* Storm-track sub-filter — overlays past-path polyline +
+                    heading arrow on storms/cyclones that have ≥2 geometry
+                    samples from EONET. */}
+                <label className="mt-2 flex items-center gap-2 py-1 text-[11px] cursor-pointer">
+                  <input type="checkbox" checked={layers.stormTracks !== false}
+                         onChange={e => setLayers(x => ({ ...x, stormTracks: e.target.checked }))}
+                         className="accent-accent-500 scale-90"/>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#38bdf8' }}/>
+                  <span className="opacity-80">Storm tracks + heading</span>
+                </label>
               </div>
             )}
 
@@ -931,7 +941,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.

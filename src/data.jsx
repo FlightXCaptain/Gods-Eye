@@ -145,12 +145,23 @@ async function fetchEONET() {
     const first = e.geometry?.[0];
     const startMs = first?.date ? new Date(first.date).getTime() : timeMs;
     const closedMs = e.closed ? new Date(e.closed).getTime() : null;
+    // Preserve the full geometry as a track for events that have multiple
+    // Point samples (storms/cyclones are the main use case — EONET reports
+    // 6-hourly positions). Non-Point geometries (fire polygons) are skipped.
+    const track = [];
+    for (const g of e.geometry) {
+      if (g.type !== 'Point' || !g.coordinates) continue;
+      const t = g.date ? new Date(g.date).getTime() : NaN;
+      if (!isFinite(t)) continue;
+      track.push({ lon: g.coordinates[0], lat: g.coordinates[1], t });
+    }
     out.push({
       id: e.id, lon, lat, title: e.title,
       category: e.categories?.[0]?.title || 'Event',
       categoryId: e.categories?.[0]?.id || 'other',
       time: timeMs, startTime: startMs, closedTime: closedMs,
       link: e.link, kind:'eonet',
+      track: track.length >= 2 ? track : null,
     });
   }
   return out;

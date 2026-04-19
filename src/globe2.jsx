@@ -1556,6 +1556,84 @@ function Globe({
           if (cid.includes('ice') || cid.includes('snow'))       return { c:'#a5f3fc', fn:iconIce };
           return { c:'#a78bfa', fn:iconEvent };
         };
+        const isStormCat = (cid) => {
+          cid = cid || '';
+          return cid.includes('storm') || cid.includes('cyclone');
+        };
+
+        // Storm tracks — draw the past-path polyline first so the current
+        // marker and heading arrow render on top. Age-faded segments mirror
+        // the ship-trail pattern at ~L2122 so history reads as history.
+        if (layers.stormTracks !== false) {
+          const now = Date.now();
+          const maxAge = 30 * 24 * 3600 * 1000;
+          octx.lineWidth = 1.2;
+          for (const e of data.events) {
+            if (!e.track || e.track.length < 2) continue;
+            if (!isStormCat(e.categoryId)) continue;
+            const { c } = catMeta(e.categoryId);
+            const pos = e.track;
+            // Polyline segments (only where both endpoints are on the
+            // visible hemisphere — a great-circle horizon split would need
+            // densification to render cleanly).
+            for (let i = 0; i < pos.length - 1; i++) {
+              const a = pos[i], b = pos[i + 1];
+              if (!visibleOn(projection, a.lon, a.lat)) continue;
+              if (!visibleOn(projection, b.lon, b.lat)) continue;
+              const pa = projection([a.lon, a.lat]);
+              const pb = projection([b.lon, b.lat]);
+              if (!pa || !pb) continue;
+              const age = Math.max(0, (now - a.t) / maxAge);
+              const alpha = Math.max(0.15, 0.75 * (1 - age));
+              octx.strokeStyle = `rgba(56, 189, 248, ${alpha.toFixed(3)})`;
+              octx.beginPath();
+              octx.moveTo(pa[0], pa[1]);
+              octx.lineTo(pb[0], pb[1]);
+              octx.stroke();
+            }
+            // Small dots at each ping so cadence is visible.
+            octx.fillStyle = `rgba(56, 189, 248, 0.55)`;
+            for (const p of pos) {
+              if (!visibleOn(projection, p.lon, p.lat)) continue;
+              const pt = projection([p.lon, p.lat]);
+              if (!pt) continue;
+              octx.beginPath();
+              octx.arc(pt[0], pt[1], 0.9, 0, Math.PI * 2);
+              octx.fill();
+            }
+            // Heading arrow at the current (last) position — screen-space
+            // angle from penultimate → last point, so projection curvature
+            // is already baked in.
+            const lastP = pos[pos.length - 1];
+            const prevP = pos[pos.length - 2];
+            if (visibleOn(projection, lastP.lon, lastP.lat) &&
+                visibleOn(projection, prevP.lon, prevP.lat)) {
+              const pl = projection([lastP.lon, lastP.lat]);
+              const pp = projection([prevP.lon, prevP.lat]);
+              if (pl && pp) {
+                const dx = pl[0] - pp[0], dy = pl[1] - pp[1];
+                const mag = Math.hypot(dx, dy);
+                if (mag > 0.5) {
+                  const ang = Math.atan2(dy, dx);
+                  const tipD = 14, baseD = 8, wing = 4;
+                  const tx = pl[0] + Math.cos(ang) * tipD;
+                  const ty = pl[1] + Math.sin(ang) * tipD;
+                  const bx = pl[0] + Math.cos(ang) * baseD;
+                  const by = pl[1] + Math.sin(ang) * baseD;
+                  const nx = -Math.sin(ang), ny = Math.cos(ang);
+                  octx.fillStyle = c;
+                  octx.beginPath();
+                  octx.moveTo(tx, ty);
+                  octx.lineTo(bx + nx * wing, by + ny * wing);
+                  octx.lineTo(bx - nx * wing, by - ny * wing);
+                  octx.closePath();
+                  octx.fill();
+                }
+              }
+            }
+          }
+        }
+
         const ePts = [];
         for (const e of data.events) {
           if (!visibleOn(projection, e.lon, e.lat)) continue;
