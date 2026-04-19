@@ -501,39 +501,28 @@ function Globe({
     // Velocity tracking for inertia
     let vx = 0, vy = 0, lastMove = 0, lastMx = 0, lastMy = 0;
     let dragging = false;
-    // Flipped true on two-finger touchstart, back to false ~30 ms after
-    // returning to <2 fingers. Suppresses d3-drag updates during a pinch
-    // so the two gestures don't fight each other.
-    let pinchActive = false;
 
     const drag = d3.drag()
-      // Mouse events pass through unconditionally. For touch, only accept
-      // single-finger interactions — this stops d3-drag from rotating the
-      // globe while our pinch handler below is trying to zoom it. Without
-      // the filter, two-finger pinch ended up both zooming AND spinning.
+      // Mouse only. Touch is handled by our custom pan+pinch+double-tap
+      // state machine below — d3-drag's touch pipeline doesn't compose
+      // cleanly with a 2-finger pinch handler, and trying to bolt
+      // pinchActive guards on top produced drag-dies-mid-gesture bugs
+      // (especially when App re-renders tore down the listeners mid-
+      // touch).
       .filter((ev) => {
-        if (ev.type && ev.type.startsWith('touch')) {
-          return ev.touches && ev.touches.length === 1;
-        }
-        return true;
+        if (ev.type === 'touchstart') return false;
+        return !ev.ctrlKey && ev.button === 0;
       })
       .on('start', (ev) => {
         dragging = true;
         markInteraction();
-        // Any pan stops focus/tracking — the user has taken control of the
-        // camera and doesn't want the tick loop snapping back to a moving
-        // target.
         onUserPan?.();
         lastMove = performance.now();
         lastMx = ev.x; lastMy = ev.y;
         vx = 0; vy = 0;
-        // snap targets to current so animation doesn't fight
         targetRotRef.current = [...rotRef.current];
       })
       .on('drag', (ev) => {
-        // Pinch is in progress — skip drag updates so both gestures don't
-        // mutate rotRef in the same frame.
-        if (pinchActive) return;
         markInteraction();
         const now = performance.now();
         const dt = Math.max(1, now - lastMove);
@@ -656,116 +645,164 @@ function Globe({
     el.addEventListener('mousemove', onMove);
     el.addEventListener('mouseleave', () => { hoverRef.current = null; });
 
-    // Touch handling — pinch zoom + double-tap focus + clean drag/pinch
-    // transition. Key decisions:
-    //   1. pinchActive flag short-circuits d3-drag updates (see drag.on('drag')
-    //      above) so a second finger doesn't let drag keep spinning the
-    //      globe while our pinch handler is trying to zoom.
-    //   2. The pinch anchor is FIXED at touchstart midpoint — recomputing
-    //      it per frame caused the zoom focal point to drift unpredictably
-    //      as fingers moved.
-    //   3. Simple double-tap detector for mobile since dblclick is flaky
-    //      on iOS with touch-action: none. Falls through to onFocusItem
-    //      when a marker is hit, same as desktop dblclick.
-    let pinchLastDist = 0;
-    let pinchAnchor = null;          // {x, y} in canvas coords, fixed per gesture
-    let singleTouchStart = null;     // {x, y, t} — for tap-vs-drag detection
-    let lastTap = null;              // {x, y, t} — for double-tap detection
-    const DOUBLE_TAP_MS     = 350;
-    const DOUBLE_TAP_MAX_DRIFT = 30; // px between taps
-    const TAP_MAX_MOVE      = 10;    // px — larger than this is a drag
+    // Touch pipeline — owned directly (no d3-drag for touch). Three
+    // gestures to disambiguate:
+    //   1-finger small move + release ............ tap       → opens dossier via synthetic click
+    //   1-finger move ........................... pan       → rotates globe with inertia on release
+    //   2 rapid 1-finger taps at the same spot .. double-tap → focus+track a marker or zoom
+    //   2 fingers ............................... pinch     → zoom toward midpoint
+    //
+    // Key details:
+    //   - Pan tracks by touch.identifier so drift+replace doesn't lose it.
+    //   - preventDefault only on touchmove while gesturing — NOT on
+    //     touchstart or non-double-tap touchend, so the browser still
+    //     synthesises click events for single-taps (which onClick picks
+    //     up and routes to onPickMarker).
+    //   - No pinchActive-gated d3-drag guards; the two gestures never
+    //     mutate rotRef in the same frame because touch events are
+    //     dispatched in a well-defined order.
+
+    const DOUBLE_TAP_MS        = 350;
+    const DOUBLE_TAP_MAX_DRIFT = 30;   // px between consecutive taps
+    const TAP_MAX_MOVE         = 10;   // px — if the finger moved more, it was a drag
+
+    let pan    = null;   // { id, startX, startY, x, y, lastT, vx, vy }
+    let pinch  = null;   // { anchor: {x,y}, lastDist }
+    let lastTap = null;  // { x, y, t }
 
     const onTouchStart = (e) => {
-      if (e.touches.length === 2) {
-        markInteraction();
-        pinchActive = true;
-        const rect = el.getBoundingClientRect();
+      markInteraction();
+      if (e.touches.length >= 2) {
+        // Enter pinch. Abandon pan if it was active — user changed intent.
+        pan = null;
         const t0 = e.touches[0], t1 = e.touches[1];
-        const dx = t0.clientX - t1.clientX;
-        const dy = t0.clientY - t1.clientY;
-        pinchLastDist = Math.hypot(dx, dy);
-        pinchAnchor = {
-          x: (t0.clientX + t1.clientX) / 2 - rect.left,
-          y: (t0.clientY + t1.clientY) / 2 - rect.top,
+        const rect = el.getBoundingClientRect();
+        pinch = {
+          anchor: {
+            x: (t0.clientX + t1.clientX) / 2 - rect.left,
+            y: (t0.clientY + t1.clientY) / 2 - rect.top,
+          },
+          lastDist: Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY),
         };
-        singleTouchStart = null;
-        return;
-      }
-      if (e.touches.length === 1) {
+      } else if (e.touches.length === 1 && !pinch) {
+        // Enter pan. Snap targets to current so animation doesn't fight.
+        onUserPan?.();
         const t = e.touches[0];
-        singleTouchStart = { x: t.clientX, y: t.clientY, t: performance.now() };
+        pan = {
+          id: t.identifier,
+          startX: t.clientX, startY: t.clientY,
+          x: t.clientX, y: t.clientY,
+          lastT: performance.now(),
+          vx: 0, vy: 0,
+        };
+        targetRotRef.current = [...rotRef.current];
       }
     };
 
     const onTouchMove = (e) => {
-      if (e.touches.length === 2 && pinchAnchor) {
+      if (pinch && e.touches.length >= 2) {
         e.preventDefault();
         markInteraction();
         const t0 = e.touches[0], t1 = e.touches[1];
-        const dx = t0.clientX - t1.clientX;
-        const dy = t0.clientY - t1.clientY;
-        const d = Math.hypot(dx, dy);
-        if (pinchLastDist > 0) {
-          zoomToward(pinchAnchor.x, pinchAnchor.y, d / pinchLastDist);
+        const d = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+        if (pinch.lastDist > 0) {
+          zoomToward(pinch.anchor.x, pinch.anchor.y, d / pinch.lastDist);
         }
-        pinchLastDist = d;
+        pinch.lastDist = d;
+        return;
+      }
+      if (pan && e.touches.length === 1) {
+        const t = Array.from(e.touches).find(tch => tch.identifier === pan.id);
+        if (!t) return;
+        e.preventDefault();
+        markInteraction();
+        const now = performance.now();
+        const dt = Math.max(1, now - pan.lastT);
+        const sens = 180 / scaleRef.current;
+        const dLon = (t.clientX - pan.x) * sens;
+        const dLat = -(t.clientY - pan.y) * sens;
+        const r = rotRef.current;
+        const newLat = Math.max(-89, Math.min(89, r[1] + dLat));
+        rotRef.current = [r[0] + dLon, newLat, 0];
+        targetRotRef.current = [...rotRef.current];
+        dirtyBase.current = true;
+        pan.vx = dLon / dt;
+        pan.vy = dLat / dt;
+        pan.x = t.clientX;
+        pan.y = t.clientY;
+        pan.lastT = now;
       }
     };
 
     const onTouchEnd = (e) => {
-      // Returning to <2 fingers — pinch is over.
-      if (e.touches.length < 2) {
-        pinchLastDist = 0;
-        pinchAnchor = null;
-        // Clear pinchActive immediately. Earlier versions had a 30 ms
-        // grace window "to avoid the remaining finger accidentally
-        // restarting drag" — but in practice it created a dead zone
-        // where single-finger input felt unrecognised. Clean transition
-        // is the better default.
-        pinchActive = false;
-      }
-      // Double-tap detection — only valid when the user had exactly one
-      // finger down, barely moved, and released cleanly.
-      if (e.changedTouches.length === 1 && e.touches.length === 0
-          && singleTouchStart && !pinchActive) {
-        const t = e.changedTouches[0];
-        const moved = Math.hypot(t.clientX - singleTouchStart.x, t.clientY - singleTouchStart.y);
-        if (moved <= TAP_MAX_MOVE) {
-          const now = performance.now();
-          if (lastTap && (now - lastTap.t) < DOUBLE_TAP_MS
-              && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < DOUBLE_TAP_MAX_DRIFT) {
-            // It's a double-tap. Hit-test for marker focus; otherwise
-            // free-space zoom toward the tap point.
-            e.preventDefault();
-            const rect = el.getBoundingClientRect();
-            const mx = t.clientX - rect.left, my = t.clientY - rect.top;
-            markInteraction();
-            const hit = hitTest(mx, my);
-            if (hit && onFocusItem) {
-              onFocusItem(hit);
-            } else {
-              projection.rotate(rotRef.current).scale(scaleRef.current);
-              const inv = projection.invert([mx, my]);
-              if (inv) {
-                targetRotRef.current = [-inv[0], -inv[1], 0];
-                targetScaleRef.current = Math.min(scaleRef.current * 2.5, Math.min(width, height) * 50);
+      // Pinch terminates as soon as we drop below 2 fingers.
+      if (pinch && e.touches.length < 2) pinch = null;
+
+      if (pan) {
+        // Did the pan-tracked finger just lift?
+        const released = Array.from(e.changedTouches).find(t => t.identifier === pan.id);
+        if (released) {
+          const moved = Math.hypot(released.clientX - pan.startX, released.clientY - pan.startY);
+          if (moved <= TAP_MAX_MOVE && !pinch) {
+            // It was a tap — check for double-tap. Single-tap falls through
+            // to the synthetic click event (no preventDefault here) so
+            // onPickMarker / onClick runs normally.
+            const now = performance.now();
+            if (lastTap
+                && (now - lastTap.t) < DOUBLE_TAP_MS
+                && Math.hypot(released.clientX - lastTap.x, released.clientY - lastTap.y) < DOUBLE_TAP_MAX_DRIFT) {
+              e.preventDefault();   // suppress the click that would otherwise fire
+              const rect = el.getBoundingClientRect();
+              const mx = released.clientX - rect.left;
+              const my = released.clientY - rect.top;
+              const hit = hitTest(mx, my);
+              if (hit && onFocusItem) {
+                onFocusItem(hit);
+              } else {
+                projection.rotate(rotRef.current).scale(scaleRef.current);
+                const inv = projection.invert([mx, my]);
+                if (inv) {
+                  targetRotRef.current = [-inv[0], -inv[1], 0];
+                  targetScaleRef.current = Math.min(scaleRef.current * 2.5, Math.min(width, height) * 50);
+                }
               }
+              lastTap = null;
+            } else {
+              lastTap = { x: released.clientX, y: released.clientY, t: now };
             }
-            lastTap = null;
           } else {
-            lastTap = { x: t.clientX, y: t.clientY, t: now };
+            // True pan — apply inertia via target rotation overshoot.
+            lastTap = null;
+            const momentum = 240;
+            const r = rotRef.current;
+            const nx = r[0] + pan.vx * momentum;
+            const ny = Math.max(-89, Math.min(89, r[1] + pan.vy * momentum));
+            targetRotRef.current = [nx, ny, 0];
           }
-        } else {
-          lastTap = null;  // drag, not tap — reset double-tap state
+          pan = null;
         }
       }
-      singleTouchStart = null;
+
+      // Pinch-to-pan transition: if exactly one finger remains after a
+      // pinch (or any multi-touch sequence), resume pan with it so the
+      // gesture feels continuous.
+      if (!pan && !pinch && e.touches.length === 1) {
+        const t = e.touches[0];
+        pan = {
+          id: t.identifier,
+          startX: t.clientX, startY: t.clientY,
+          x: t.clientX, y: t.clientY,
+          lastT: performance.now(),
+          vx: 0, vy: 0,
+        };
+        targetRotRef.current = [...rotRef.current];
+      }
     };
 
-    el.addEventListener('touchstart', onTouchStart, { passive: false });
-    el.addEventListener('touchmove', onTouchMove, { passive: false });
-    el.addEventListener('touchend', onTouchEnd);
-    el.addEventListener('touchcancel', onTouchEnd);
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove',  onTouchMove,  { passive: false });
+    el.addEventListener('touchend',   onTouchEnd,   { passive: false });
+    el.addEventListener('touchcancel', onTouchEnd,  { passive: true });
 
     return () => {
       sel.on('.drag', null);
