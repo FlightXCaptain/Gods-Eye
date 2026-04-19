@@ -320,6 +320,15 @@ function Globe({
   // runs only when the flight dataset actually refreshes (every ~25s), not
   // on every RAF frame.
   const sortedFlightsRef = useRef([]);
+  // Per-flight smoothing state. Each entry tracks the last real ADS-B
+  // report (the "anchor") and the currently-displayed position that
+  // eases toward a dead-reckoned prediction from that anchor. Removes
+  // the teleport-on-snapshot jank when polls finish every 10-25 s.
+  //
+  //   anchorLat/Lon/Hdg/Vel/T  — from the last real server update
+  //   displayLat/Lon/Hdg       — what we draw this frame
+  //   lastTs                   — server's _ts, detects "new update arrived"
+  const flightStateRef = useRef(new Map());
   // Base canvas redraw throttle. During idle auto-rotate we'd otherwise be
   // reparsing country / state / river / lake features 60×/sec; cap to ~30fps.
   const lastBaseRedrawMsRef = useRef(0);
@@ -1035,6 +1044,14 @@ function Globe({
           case 'ship':   live = data.ships?.find(s => s.mmsi === focusTarget.trackId); break;
           case 'sat':    live = data.sats?.find(s => (s.norad || s.name) === focusTarget.trackId); break;
         }
+        // For flights, prefer the eased display position (from dead-reckoning
+        // smoother) over the raw snapshot — otherwise the camera jitters
+        // every time a new ADS-B update arrives even though the icon moves
+        // smoothly.
+        if (focusTarget.trackLayer === 'flight' && live) {
+          const st = flightStateRef.current.get(focusTarget.trackId);
+          if (st) live = { ...live, lat: st.displayLat, lon: st.displayLon };
+        }
         if (live && typeof live.lat === 'number' && typeof live.lon === 'number') {
           targetRotRef.current = [-live.lon, -live.lat, 0];
           focusLiveCoordsRef.current = [live.lon, live.lat];
@@ -1625,16 +1642,81 @@ function Globe({
         const sorted = sortedFlightsRef.current.length ? sortedFlightsRef.current : data.flights;
         const seenFlight = new Set();
         const rendered = [];
+        const fState = flightStateRef.current;
+        const seenIds = new Set();
+        const EASE_POS = 0.18;
+        const EASE_HDG = 0.12;
+        const DR_MAX_AGE_S = 120;   // stop extrapolating after 2 min stale
+
         for (const f of sorted) {
-          if (!visibleOn(projection, f.lon, f.lat)) continue;
-          const pt = projection([f.lon, f.lat]); if (!pt) continue;
+          seenIds.add(f.id);
+
+          // --- Smoothing state ---
+          let st = fState.get(f.id);
+          if (!st) {
+            // First time seeing this flight — snap display to reported pos.
+            st = {
+              anchorLat: f.lat, anchorLon: f.lon,
+              anchorHdg: f.hdg || 0, anchorVel: f.vel || 0,
+              anchorT:   tickNow,
+              lastTs:    f._ts || 0,
+              displayLat: f.lat, displayLon: f.lon,
+              displayHdg: f.hdg || 0,
+            };
+            fState.set(f.id, st);
+          } else if ((f._ts || 0) > st.lastTs) {
+            // Fresh server update — re-anchor and let the display ease toward it.
+            st.anchorLat = f.lat;
+            st.anchorLon = f.lon;
+            st.anchorHdg = (typeof f.hdg === 'number') ? f.hdg : st.anchorHdg;
+            st.anchorVel = (typeof f.vel === 'number') ? f.vel : st.anchorVel;
+            st.anchorT   = tickNow;
+            st.lastTs    = f._ts;
+          }
+
+          // Dead-reckon from anchor forward by elapsed time × velocity.
+          const dtSec = Math.min(DR_MAX_AGE_S, (tickNow - st.anchorT) / 1000);
+          let predLat = st.anchorLat;
+          let predLon = st.anchorLon;
+          if (st.anchorVel > 0 && dtSec > 0) {
+            const km = st.anchorVel * 1.852 / 3600 * dtSec;   // knots → km
+            const hdgRad = (st.anchorHdg || 0) * Math.PI / 180;
+            const latRad = st.anchorLat * Math.PI / 180;
+            predLat += (km * Math.cos(hdgRad)) / 111;
+            predLon += (km * Math.sin(hdgRad)) / (111 * Math.max(0.1, Math.cos(latRad)));
+          }
+
+          // Ease display toward the prediction. Exponential smoothing is
+          // cheap and naturally damps jitter; big jumps (e.g. after a long
+          // stall) are pulled in over ~6-8 frames.
+          st.displayLat += (predLat - st.displayLat) * EASE_POS;
+          st.displayLon += (predLon - st.displayLon) * EASE_POS;
+
+          // Heading: shortest-angular-path lerp so a 359°→1° turn goes the
+          // short way, not a 358° spin.
+          const targetHdg = (typeof f.hdg === 'number') ? f.hdg : st.anchorHdg;
+          let dh = targetHdg - st.displayHdg;
+          while (dh > 180)  dh -= 360;
+          while (dh < -180) dh += 360;
+          st.displayHdg += dh * EASE_HDG;
+
+          // --- Visibility + spatial decimation use the eased position ---
+          if (!visibleOn(projection, st.displayLon, st.displayLat)) continue;
+          const pt = projection([st.displayLon, st.displayLat]); if (!pt) continue;
           const [px, py] = pt;
           const k = (Math.floor(px / flightCell) << 16) | (Math.floor(py / flightCell) & 0xffff);
           if (seenFlight.has(k)) continue;
           seenFlight.add(k);
-          // Record current position into this flight's trail.
-          pushTrail(flightHistRef.current, f.id, f.lon, f.lat);
-          rendered.push({ f, px, py });
+          // Trail history records the EASED position too — otherwise the
+          // tail and the icon would drift apart as DR predicts forward.
+          pushTrail(flightHistRef.current, f.id, st.displayLon, st.displayLat);
+          rendered.push({ f, px, py, hdg: st.displayHdg });
+        }
+
+        // Prune state for flights that left the snapshot (landed, stale,
+        // out of range). Keeps the map bounded without GC pressure.
+        for (const hex of fState.keys()) {
+          if (!seenIds.has(hex)) fState.delete(hex);
         }
         // Trails first so markers sit on top. Prefer the server-seeded `track`
         // array — it carries up to 10 past positions even on first render, so
@@ -1646,9 +1728,10 @@ function Globe({
           const hist = (f.track && f.track.length >= 2) ? f.track : flightHistRef.current.get(f.id);
           drawTrail(hist, trailCol);
         }
-        // Now the plane icons + hit regions.
-        for (const { f, px, py } of rendered) {
-          drawPlane(px, py, f.hdg, scale);
+        // Now the plane icons + hit regions. Use the EASED heading from
+        // the smoother state so turns animate instead of snapping.
+        for (const { f, px, py, hdg } of rendered) {
+          drawPlane(px, py, hdg, scale);
           pushHit(px, py, Math.max(7, flightCell * 0.45), 'flight', f);
         }
       }
