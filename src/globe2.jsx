@@ -487,6 +487,16 @@ function Globe({
     let dragging = false;
 
     const drag = d3.drag()
+      // Mouse events pass through unconditionally. For touch, only accept
+      // single-finger interactions — this stops d3-drag from rotating the
+      // globe while our pinch handler below is trying to zoom it. Without
+      // the filter, two-finger pinch ended up both zooming AND spinning.
+      .filter((ev) => {
+        if (ev.type && ev.type.startsWith('touch')) {
+          return ev.touches && ev.touches.length === 1;
+        }
+        return true;
+      })
       .on('start', (ev) => {
         dragging = true;
         markInteraction();
@@ -641,8 +651,16 @@ function Globe({
         pinchLastDist = d;
       }
     };
+    // Reset the pinch baseline any time a finger leaves the screen — otherwise
+    // the next pinch starts with a stale `pinchLastDist` and the first move
+    // frame causes a big zoom jump.
+    const onTouchEnd = (e) => {
+      if (e.touches.length < 2) pinchLastDist = 0;
+    };
     el.addEventListener('touchstart', onTouchStart, { passive: false });
     el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd);
+    el.addEventListener('touchcancel', onTouchEnd);
 
     return () => {
       sel.on('.drag', null);
@@ -652,6 +670,8 @@ function Globe({
       el.removeEventListener('mousemove', onMove);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
     };
   }, [width, height, projection, onPickMarker]);
 
