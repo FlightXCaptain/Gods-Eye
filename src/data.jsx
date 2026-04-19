@@ -132,14 +132,21 @@ async function fetchEONET() {
     } else continue;
     // Normalise EONET timestamps to epoch ms at ingestion so downstream
     // filters can do cheap numeric comparisons instead of parsing ISO on
-    // every render.
+    // every render. `time` is the MOST RECENT geometry point (for an
+    // active wildfire, that's today); `startTime` is the FIRST point
+    // (when the event was first detected). Globe filter uses both so
+    // long-running events stay visible throughout their lifecycle
+    // instead of only in the last 24 h after their most recent update.
     const timeMs = last.date ? new Date(last.date).getTime() : NaN;
     if (!isFinite(timeMs)) continue;
+    const first = e.geometry?.[0];
+    const startMs = first?.date ? new Date(first.date).getTime() : timeMs;
     out.push({
       id: e.id, lon, lat, title: e.title,
       category: e.categories?.[0]?.title || 'Event',
       categoryId: e.categories?.[0]?.id || 'other',
-      time: timeMs, link: e.link, kind:'eonet',
+      time: timeMs, startTime: startMs,
+      link: e.link, kind:'eonet',
     });
   }
   return out;
