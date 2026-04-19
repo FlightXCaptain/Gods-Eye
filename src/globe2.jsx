@@ -2357,23 +2357,22 @@ function Globe({
           // Confidence 0..2 → low/nominal/high. Higher = hotter colour + brighter.
           const hot = f.conf >= 2;
           const col = hot ? 'rgba(251, 146, 60, 0.95)' : 'rgba(239, 68, 68, 0.80)';
-          const r = mode === 'full' ? 2.2 : mode === 'compact' ? 1.6 : 1.1;
-          octx.fillStyle = col;
-          octx.beginPath();
-          octx.arc(px, py, r, 0, Math.PI * 2);
-          octx.fill();
-          // Full-mode high-confidence fires get a soft halo glow. Two
-          // alpha-stacked circles stand in for a radial gradient — on a
-          // fire-heavy frame we'd otherwise allocate a thousand-plus
-          // gradient objects per second for the GC to chew through.
           if (mode === 'full' && hot) {
+            // Soft halo + proper flame glyph for the significant detections
+            // — these are the ones that read as "something's burning",
+            // not just a density pixel in the cluster dot-cloud.
             octx.fillStyle = 'rgba(254, 215, 170, 0.18)';
             octx.beginPath();
             octx.arc(px, py, 6, 0, Math.PI * 2);
             octx.fill();
-            octx.fillStyle = 'rgba(254, 215, 170, 0.35)';
+            iconFire(octx, px, py, 7, col);
+          } else {
+            // Dense cluster / lower-confidence: tiny dot so fire-line
+            // patterns still read at regional zoom.
+            const r = mode === 'full' ? 2.2 : mode === 'compact' ? 1.6 : 1.1;
+            octx.fillStyle = col;
             octx.beginPath();
-            octx.arc(px, py, 3.4, 0, Math.PI * 2);
+            octx.arc(px, py, r, 0, Math.PI * 2);
             octx.fill();
           }
           // Push a hit only for high-confidence / full detections so the
