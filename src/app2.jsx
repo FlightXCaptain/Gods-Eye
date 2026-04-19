@@ -870,6 +870,56 @@ function App() {
   const stopAutoRotate = useCallback(() => {
     setAutoRotate(prev => prev ? false : prev);
   }, []);
+
+  // Stable ref so the Globe's pointer/touch setup useEffect doesn't tear
+  // down and recreate listeners on every App render (which was killing
+  // drag mid-gesture every time nowCursor ticked).
+  const handleUserPan = useCallback(() => {
+    setFocusTarget(null);
+  }, []);
+
+  // Double-click / double-tap on a marker → focus + track. Also stable —
+  // keeps the Globe's drag listeners from being recreated on every render.
+  // Per-layer zoom presets: fast/wide targets (ISS, country) stay modest
+  // so they don't fly off-screen, stationary POIs (ship, camera) pull
+  // close so you can read the label. Dossier surfaces alongside so the
+  // user can inspect metadata while the camera tracks.
+  const handleFocusItem = useCallback((hit) => {
+    const layer = hit._layer;
+    const zoomByLayer = {
+      iss: 3, sat: 3, country: 2.5,
+      event: 4, lake: 4, quake: 5,
+      city: 6, flight: 12, ship: 14,
+    };
+    const labelFor = (it, l) => {
+      switch (l) {
+        case 'iss':     return it.name || 'ISS · ZARYA';
+        case 'sat':     return it.name || 'Satellite';
+        case 'flight':  return it.callsign || it.reg || 'Aircraft';
+        case 'ship':    return it.name || `MMSI ${it.mmsi}`;
+        case 'city':    return it.name || 'City';
+        case 'country': return it.name || 'Country';
+        case 'lake':    return it.name || 'Lake';
+        case 'quake':   return `M${typeof it.mag === 'number' ? it.mag.toFixed(1) : '?'} · ${it.place || 'Earthquake'}`;
+        case 'event':   return it.title || 'Event';
+        default:        return 'Target';
+      }
+    };
+    const trackKey = layer === 'flight' ? hit.id
+      : layer === 'ship' ? hit.mmsi
+      : layer === 'sat'  ? (hit.norad || hit.name)
+      : layer === 'iss'  ? 'iss'
+      : null;
+    setFocusTarget({
+      type: layer,
+      label: labelFor(hit, layer),
+      coords: [hit.lon, hit.lat],
+      zoom: zoomByLayer[layer] || 2.5,
+      trackId: trackKey,
+      trackLayer: layer,
+    });
+    setPicked(hit);
+  }, []);
   const toggleAutoRotate = useCallback(() => {
     setAutoRotate(prev => {
       if (!prev) {
@@ -1208,60 +1258,14 @@ function App() {
           data={filteredData}
           nowCursor={nowCursor}
           onPickMarker={setPicked}
-          onFocusItem={(hit) => {
-            // Double-clicking a marker zooms in and (for moving objects)
-            // keeps the globe centred on it. Per-layer zoom presets — wide
-            // for fast/broad targets (ISS, country), close for stationary
-            // POIs (ship, city). The trackId / trackLayer fields let the
-            // Globe tick loop re-resolve the object's live position every
-            // frame.
-            const layer = hit._layer;
-            // Zoom factors scale the default globe size. Flights and ships
-            // pull tight so the marker fills a useful chunk of the viewport
-            // and you can read the callsign/name clearly. ISS and sats stay
-            // modest because they move fast — over-zooming loses them.
-            const zoomByLayer = {
-              iss: 3, sat: 3, country: 2.5,
-              event: 4, lake: 4, quake: 5,
-              city: 6, flight: 12, ship: 14,
-            };
-            const labelFor = (it, l) => {
-              switch (l) {
-                case 'iss':     return it.name || 'ISS · ZARYA';
-                case 'sat':     return it.name || 'Satellite';
-                case 'flight':  return it.callsign || it.reg || 'Aircraft';
-                case 'ship':    return it.name || `MMSI ${it.mmsi}`;
-                case 'city':    return it.name || 'City';
-                case 'country': return it.name || 'Country';
-                case 'lake':    return it.name || 'Lake';
-                case 'quake':   return `M${typeof it.mag === 'number' ? it.mag.toFixed(1) : '?'} · ${it.place || 'Earthquake'}`;
-                case 'event':   return it.title || 'Event';
-                default:        return 'Target';
-              }
-            };
-            const trackKey = layer === 'flight' ? hit.id
-              : layer === 'ship' ? hit.mmsi
-              : layer === 'sat'  ? (hit.norad || hit.name)
-              : layer === 'iss'  ? 'iss'
-              : null;
-            setFocusTarget({
-              type: layer,
-              label: labelFor(hit, layer),
-              coords: [hit.lon, hit.lat],
-              zoom: zoomByLayer[layer] || 2.5,
-              trackId: trackKey,         // null for stationary targets
-              trackLayer: layer,
-            });
-            // Surface the dossier as well — useful metadata to read while tracking.
-            setPicked(hit);
-          }}
+          onFocusItem={handleFocusItem}
           focusTarget={focusTarget}
           theme={theme}
           animationIntensity={animIntensity}
           layers={layers}
           autoRotate={autoRotate}
           onInteract={stopAutoRotate}
-          onUserPan={() => setFocusTarget(null)}
+          onUserPan={handleUserPan}
           zoomOutSignal={zoomOutSignal}
         />
       </div>
