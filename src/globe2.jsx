@@ -1668,6 +1668,78 @@ function Globe({
         }
       }
 
+      // Active tropical cyclones (NHC CurrentStorms + forecast cone + track).
+      // Atlantic / Eastern Pacific / Central Pacific basins only. Drawn on the
+      // overlay so forecast geometry repaints with zoom changes without a
+      // basemap invalidation. Cone fills first (so it sits under the track
+      // polyline and the storm glyph), then track, then spiral marker.
+      if (layers.cyclones !== false && Array.isArray(data.cyclones) && data.cyclones.length) {
+        // Color ramp keyed to intensity in knots (Saffir-Simpson for
+        // hurricanes; below-cat-1 buckets follow NHC classification).
+        const cycloneColor = (kt) => {
+          if (!isFinite(kt) || kt < 34) return '#38bdf8';  // TD / Low: cyan
+          if (kt < 64)  return '#facc15';                   // TS / STS: yellow
+          if (kt < 83)  return '#fb923c';                   // Cat 1: orange
+          if (kt < 96)  return '#f97316';                   // Cat 2: deep orange
+          if (kt < 113) return '#ef4444';                   // Cat 3: red
+          if (kt < 137) return '#dc2626';                   // Cat 4: crimson
+          return '#ec4899';                                 // Cat 5: magenta
+        };
+        const opath = d3.geoPath(projection, octx);
+        for (const cy of data.cyclones) {
+          const col = cycloneColor(cy.intensityKt);
+
+          // Forecast cone — filled at very low alpha with a dashed outline so
+          // the uncertainty envelope reads distinctly from the track itself.
+          if (cy.cone) {
+            octx.save();
+            octx.fillStyle = col + '22';  // ~13% alpha
+            octx.strokeStyle = col + 'aa';
+            octx.lineWidth = 0.8;
+            octx.setLineDash([3, 3]);
+            octx.beginPath();
+            opath(cy.cone);
+            octx.fill();
+            octx.stroke();
+            octx.restore();
+          }
+
+          // Forecast track — solid polyline in storm color.
+          if (cy.track) {
+            octx.save();
+            octx.strokeStyle = col;
+            octx.lineWidth = 1.3;
+            octx.beginPath();
+            opath(cy.track);
+            octx.stroke();
+            octx.restore();
+          }
+
+          // Current position marker — scale spiral with intensity so a Cat 5
+          // visibly dominates a tropical depression on the same map.
+          if (visibleOn(projection, cy.lon, cy.lat)) {
+            const pt = projection([cy.lon, cy.lat]); if (!pt) continue;
+            const size = 10 + Math.min(12, Math.max(0, (cy.intensityKt || 0) - 30) * 0.15);
+            iconStorm(octx, pt[0], pt[1], size, col);
+            // Name label at zoom ≥ 1.6 (below that the globe is too small to
+            // carry readable text for multiple simultaneous storms).
+            if (zoom >= 1.6) {
+              const label = cy.name + (cy.classification ? ` · ${cy.classification}` : '');
+              octx.font = '10px Geist Mono, ui-monospace';
+              octx.textBaseline = 'middle';
+              octx.textAlign = 'left';
+              const tw = octx.measureText(label).width;
+              const lx = pt[0] + size * 0.8, ly = pt[1] + 0.5;
+              octx.fillStyle = isDark ? 'rgba(10,10,15,0.7)' : 'rgba(255,255,255,0.8)';
+              octx.fillRect(lx - 2, ly - 7, tw + 4, 13);
+              octx.fillStyle = col;
+              octx.fillText(label, lx, ly);
+            }
+            pushHit(pt[0], pt[1], Math.max(10, size * 0.8), 'cyclone', cy);
+          }
+        }
+      }
+
       // Lightning strikes — quick bright flashes that fade over ~3 s.
       // Rendered on the overlay (which redraws every frame) so the fade
       // animation reads correctly. No hit regions — strikes are too
@@ -2314,6 +2386,9 @@ function Globe({
           })()}
           {hover._layer === 'quake' && <span>M{hover.mag?.toFixed(1)} · {hover.place}</span>}
           {hover._layer === 'event' && <span>{hover.category} · {hover.title}</span>}
+          {hover._layer === 'cyclone' && (
+            <span>{hover.classification ? `${hover.classification} ` : ''}{hover.name}{hover.intensityKt ? ` · ${Math.round(hover.intensityKt)} kt` : ''}{hover.pressureMb ? ` · ${Math.round(hover.pressureMb)} mb` : ''}</span>
+          )}
           {hover._layer === 'fire' && (
             <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>
           )}
