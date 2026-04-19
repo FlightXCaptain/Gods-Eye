@@ -335,6 +335,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
     ['wind','Wind flow',  'aurora',  '#60a5fa'],
+    ['oceanCurrents','Ocean currents', 'aurora', '#0d9488'],
     ['daynight','Day / night shade', 'moon',  '#94a3b8'],
     ['tsunamis','Tsunami archive', 'tsunami', '#22d3ee'],
   ];
@@ -1061,7 +1062,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
