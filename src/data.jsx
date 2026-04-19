@@ -305,6 +305,69 @@ async function fetchInternetOutages() {
   return out;
 }
 
+// Submarine communications cables — goes through our /api/cables proxy
+// because TeleGeography's public endpoint doesn't send CORS headers, so a
+// direct browser fetch fails. The proxy trims each feature to the four
+// fields the UI uses.
+async function fetchSubmarineCables() {
+  const j = await safeFetch('/api/cables');
+  if (!Array.isArray(j)) return [];
+  return j.map(f => ({
+    id: f.id || f.name,
+    name: f.name || 'Unnamed cable',
+    color: f.color || '#22d3ee',
+    geometry: f.geometry, // LineString / MultiLineString — passed to d3.geoPath
+    kind: 'cable',
+  }));
+}
+
+// Nuclear power reactors (GeoNuclearData/cristianst85). 106 KB CSV, ~800
+// reactors with lat/lon, status, reactor type, net capacity (MW). Simple
+// enough to parse with a plain split — the feed has no quoted or
+// comma-containing fields in practice.
+async function fetchNuclearReactors() {
+  const res = await fetch('https://raw.githubusercontent.com/cristianst85/GeoNuclearData/master/data/csv/denormalized/nuclear_power_plants.csv');
+  if (!res.ok) return [];
+  const text = await res.text();
+  const lines = text.split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const header = lines[0].split(',');
+  const idx = (k) => header.indexOf(k);
+  const iName = idx('Name'), iLat = idx('Latitude'), iLon = idx('Longitude'),
+        iCountry = idx('Country'), iStatus = idx('Status'), iType = idx('ReactorType'),
+        iCap = idx('Capacity'), iOpFrom = idx('OperationalFrom'), iOpTo = idx('OperationalTo'),
+        iId = idx('Id');
+  const out = [];
+  for (let li = 1; li < lines.length; li++) {
+    const row = lines[li];
+    if (!row) continue;
+    const f = row.split(',');
+    const lat = parseFloat(f[iLat]), lon = parseFloat(f[iLon]);
+    if (!isFinite(lat) || !isFinite(lon)) continue;
+    out.push({
+      id: f[iId] || `nuke-${li}`,
+      name: f[iName] || 'Reactor',
+      lon, lat,
+      country: f[iCountry] || '',
+      status: f[iStatus] || '',              // Operational, Shutdown, Construction, Planned, Cancelled
+      reactorType: f[iType] || '',           // PWR, BWR, PHWR, etc.
+      capacity: parseFloat(f[iCap]) || null, // net MWe
+      opFrom: f[iOpFrom] || null,
+      opTo: f[iOpTo] || null,
+      kind: 'reactor',
+    });
+  }
+  return out;
+}
+
+// Global power-plant fleet. WRI GPPD is ~12 MB — too large to fetch from the
+// client on every load, so we go through a serverless proxy that filters to
+// capacity >= 100 MW and returns a trimmed JSON (~1 MB for the whole world).
+async function fetchPowerPlants() {
+  const j = await safeFetch('/api/power-plants');
+  return Array.isArray(j) ? j : [];
+}
+
 async function fetchKp() {
   const j = await safeFetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json');
   if (!Array.isArray(j)) return null;
@@ -484,6 +547,7 @@ function propagateSats(tleList, when) {
 
 Object.assign(window, {
   fetchQuakes, fetchISS, fetchFlights, fetchEONET, fetchNHC, fetchKp, fetchAurora,
-  fetchTsunamis, fetchInternetOutages, fetchSatellites, propagateSats, loadSatcat,
+  fetchTsunamis, fetchInternetOutages, fetchSubmarineCables, fetchNuclearReactors,
+  fetchPowerPlants, fetchSatellites, propagateSats, loadSatcat,
   subscribeWikiEdits, COUNTRY_POINTS,
 });
