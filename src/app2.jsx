@@ -315,7 +315,8 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
 };
 
 function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
-                         shipFilters, setShipFilters, flightFilters, setFlightFilters }) {
+                         shipFilters, setShipFilters, flightFilters, setFlightFilters,
+                         newsFilters, setNewsFilters }) {
   const [open, setOpen] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
@@ -329,6 +330,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['cables','Submarine cables', 'aurora', '#22d3ee'],
     ['reactors','Nuclear reactors', 'radiation', '#22c55e'],
     ['plants','Power plants', 'bolt', '#f59e0b'],
+    ['news','News hotspots', 'wiki', '#ef4444'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
@@ -418,6 +420,42 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                           <span className="opacity-80 truncate">{slabel}</span>
                         </label>
                       ))}
+                    </div>
+                  )}
+                  {k === 'news' && layers.news && (
+                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
+                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Theme (CAMEO)</div>
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                        {[
+                          ['quadCoop',     'Verbal coop',  '#22c55e'],
+                          ['quadMat',      'Material coop','#0ea5e9'],
+                          ['quadVerbal',   'Verbal conflict','#f59e0b'],
+                          ['quadConflict', 'Mat. conflict','#ef4444'],
+                        ].map(([nk, nlabel, ncol]) => (
+                          <label key={nk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                            <input type="checkbox" checked={newsFilters[nk] !== false}
+                                   onChange={e => setNewsFilters(x => ({ ...x, [nk]: e.target.checked }))}
+                                   className="accent-accent-500 scale-90"/>
+                            <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: ncol }}/>
+                            <span className="opacity-80 truncate">{nlabel}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider pt-1">Tone</div>
+                      <div className="grid grid-cols-3 gap-x-2 gap-y-0.5">
+                        {[
+                          ['toneNeg', 'Negative'],
+                          ['toneNeu', 'Neutral'],
+                          ['tonePos', 'Positive'],
+                        ].map(([tk, tlabel]) => (
+                          <label key={tk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                            <input type="checkbox" checked={newsFilters[tk] !== false}
+                                   onChange={e => setNewsFilters(x => ({ ...x, [tk]: e.target.checked }))}
+                                   className="accent-accent-500 scale-90"/>
+                            <span className="opacity-80 truncate">{tlabel}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </React.Fragment>
@@ -526,6 +564,7 @@ function Dossier({ item, onClose }) {
               : layer === 'outage' ? 'Network'
               : layer === 'reactor' ? 'Nuclear'
               : layer === 'plant' ? 'Power'
+              : layer === 'news' ? 'News'
               : layer === 'fire' ? 'Thermal'
               : layer === 'sat' ? 'Satellite'
               : layer === 'city' ? 'City'
@@ -607,6 +646,19 @@ function Dossier({ item, onClose }) {
           <KV k="Type" v={item.category}/>
           <KV k="Updated" v={fmtTime(item.time)}/>
           {item.link && <a href={item.link} target="_blank" className="text-xs text-accent-500 underline">NASA EONET →</a>}
+        </>}
+        {layer === 'news' && <>
+          <div className="text-lg">{item.place || 'News hotspot'}</div>
+          <div className="text-sm opacity-70">GDELT 2.0 · {item.country || ''}</div>
+          {(() => {
+            const quadLabels = { 1: 'Verbal cooperation', 2: 'Material cooperation', 3: 'Verbal conflict', 4: 'Material conflict' };
+            return item.quad ? <KV k="Theme" v={quadLabels[item.quad] || 'Unknown'}/> : null;
+          })()}
+          {item.tone != null && <KV k="Tone" v={`${item.tone.toFixed(2)} (${item.tone >= 1 ? 'positive' : item.tone <= -1 ? 'negative' : 'neutral'})`}/>}
+          {item.goldstein != null && <KV k="Goldstein" v={item.goldstein.toFixed(1)}/>}
+          {item.mentions != null && <KV k="Mentions" v={String(item.mentions)}/>}
+          {item.rootCode != null && <KV k="CAMEO" v={String(item.rootCode).padStart(2, '0')}/>}
+          {item.url && <a href={item.url} target="_blank" rel="noopener" className="text-xs text-accent-500 underline truncate block">source →</a>}
         </>}
         {layer === 'reactor' && <>
           <div className="text-lg">{item.name}</div>
@@ -1009,7 +1061,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
@@ -1041,6 +1093,20 @@ function App() {
     if (JSON.stringify(merged) !== JSON.stringify(flightFilters)) setFlightFilters(merged);
     localStorage.setItem('ge-flight-filters', JSON.stringify(merged));
   }, [flightFilters]);
+
+  // GDELT news theme (CAMEO QuadClass) + tone (negative/neutral/positive)
+  // multi-selects. Defaults: all themes on, negative-only tone bias — this
+  // is a "global heartbeat" layer, so the default view emphasises
+  // conflict/protest while keeping everything available.
+  const [newsFilters, setNewsFilters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ge-news-filters')) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    const def = { quadCoop:true, quadMat:true, quadVerbal:true, quadConflict:true, tonePos:true, toneNeu:true, toneNeg:true };
+    const merged = { ...def, ...newsFilters };
+    if (JSON.stringify(merged) !== JSON.stringify(newsFilters)) setNewsFilters(merged);
+    localStorage.setItem('ge-news-filters', JSON.stringify(merged));
+  }, [newsFilters]);
 
   const [animIntensity, setAnimIntensity] = useState(TWEAK_DEFAULTS.animationIntensity);
   // Auto-rotate. Starts on every load, any interaction flips it off, only
@@ -1088,6 +1154,7 @@ function App() {
         case 'outage':  return (it.locations?.[0]?.name || 'Internet outage') + (it.ongoing ? ' · ongoing' : '');
         case 'reactor': return it.name || 'Reactor';
         case 'plant':   return it.name || 'Power plant';
+        case 'news':    return (it.place || 'News hotspot') + (it.tone ? ` · tone ${it.tone.toFixed(1)}` : '');
         default:        return 'Target';
       }
     };
@@ -1121,7 +1188,7 @@ function App() {
   }, []);
 
   // Data
-  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], cyclones:[], outages:[], cables:[], reactors:[], plants:[], iss:null, sats:[], satTLEs:[], ships:[] });
+  const [data, setData] = useState({ flights:[], quakes:[], events:[], aurora:[], tsunamis:[], cyclones:[], outages:[], cables:[], reactors:[], plants:[], news:[], iss:null, sats:[], satTLEs:[], ships:[] });
   const [kp, setKp] = useState(null);
   const [ticker, setTicker] = useState([]);
 
@@ -1189,11 +1256,11 @@ function App() {
   useEffect(() => {
     let alive = true;
     const loadAll = async () => {
-      const [q,e,k,a,t,cy,ou] = await Promise.all([
-        fetchQuakes(), fetchEONET(), fetchKp(), fetchAurora(), fetchTsunamis(), fetchNHC(), fetchInternetOutages(),
+      const [q,e,k,a,t,cy,ou,nw] = await Promise.all([
+        fetchQuakes(), fetchEONET(), fetchKp(), fetchAurora(), fetchTsunamis(), fetchNHC(), fetchInternetOutages(), fetchNewsHotspots(),
       ]);
       if (!alive) return;
-      setData(d => ({...d, quakes:q, events:e, aurora:a, tsunamis:t, cyclones:cy, outages:ou }));
+      setData(d => ({...d, quakes:q, events:e, aurora:a, tsunamis:t, cyclones:cy, outages:ou, news:nw }));
       setKp(k);
       // Push to live feed
       pushFeed((q||[]).slice(0,15).map(qk => ({
@@ -1433,8 +1500,26 @@ function App() {
         const b = flightBucket(f);
         return flightFilters[b] !== false;
       }),
+      // GDELT news: CAMEO QuadClass 1/2/3/4 → theme chip; tone sign →
+      // positive/neutral/negative chip. If every chip in a group is off,
+      // hide all news (acts as a kill switch without touching the main
+      // toggle). Threshold for "neutral" is ±1 — anything inside that
+      // band reads as balanced coverage.
+      news: (data.news || []).filter(n => {
+        const q = n.quad;
+        const themeKey =
+          q === 1 ? 'quadCoop' :
+          q === 2 ? 'quadMat' :
+          q === 3 ? 'quadVerbal' :
+          q === 4 ? 'quadConflict' : null;
+        if (themeKey && newsFilters[themeKey] === false) return false;
+        const t = n.tone || 0;
+        const toneKey = t >= 1 ? 'tonePos' : t <= -1 ? 'toneNeg' : 'toneNeu';
+        if (newsFilters[toneKey] === false) return false;
+        return true;
+      }),
     };
-  }, [data, nowCursor, seismicMin, shipFilters, flightFilters]);
+  }, [data, nowCursor, seismicMin, shipFilters, flightFilters, newsFilters]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden">
@@ -1504,6 +1589,7 @@ function App() {
             <LayersPopover layers={layers} setLayers={setLayers} theme={theme}
   seismicMin={seismicMin} setSeismicMin={setSeismicMin}
   shipFilters={shipFilters} setShipFilters={setShipFilters}
+            newsFilters={newsFilters} setNewsFilters={setNewsFilters}
   flightFilters={flightFilters} setFlightFilters={setFlightFilters}/>
             <button
               onClick={() => toggleAutoRotate()}
@@ -1530,6 +1616,7 @@ function App() {
           <LayersPopover layers={layers} setLayers={setLayers} theme={theme}
   seismicMin={seismicMin} setSeismicMin={setSeismicMin}
   shipFilters={shipFilters} setShipFilters={setShipFilters}
+            newsFilters={newsFilters} setNewsFilters={setNewsFilters}
   flightFilters={flightFilters} setFlightFilters={setFlightFilters}/>
           <button
             onClick={() => toggleAutoRotate()}
