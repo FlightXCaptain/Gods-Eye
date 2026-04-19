@@ -1097,7 +1097,9 @@ function App() {
     const on = (e) => {
       if (e.target.tagName === 'INPUT') return;
       if (e.key === 'r' || e.key === 'R') { setFocusTarget(null); }
-      if (e.key === 'Escape') setPicked(null);
+      // Escape closes the dossier AND stops tracking — one keystroke to
+      // reset the view without having to pan or hit the toolbar button.
+      if (e.key === 'Escape') { setPicked(null); setFocusTarget(null); }
       if (e.key === ' ') { e.preventDefault(); setPlaying(p=>!p); }
     };
     window.addEventListener('keydown', on);
@@ -1146,6 +1148,25 @@ function App() {
           </div>
         </div>
       )}
+      {/* Tracking indicator — visible whenever the user has focused a
+          target. Explicit Stop button + keyboard hint so the interaction
+          is discoverable without having to know about the toolbar reset. */}
+      {focusTarget && (
+        <div className="absolute top-32 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+          <div className="glass-strong rounded-full pl-3 pr-1.5 py-1 flex items-center gap-2 font-mono text-[11px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-accent-500 bpulse shrink-0"/>
+            <span className="uppercase tracking-wider opacity-80">Tracking</span>
+            <span className="opacity-60 truncate max-w-[180px]">· {focusTarget.label}</span>
+            <button
+              onClick={() => setFocusTarget(null)}
+              title="Stop tracking (Esc)"
+              className="ml-1 rounded-full px-2 py-0.5 bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 transition uppercase tracking-wider text-[10px]"
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+      )}
       <div className="absolute inset-0 flex items-center justify-center">
         <Globe
           width={w} height={h}
@@ -1160,10 +1181,13 @@ function App() {
             // Globe tick loop re-resolve the object's live position every
             // frame.
             const layer = hit._layer;
+            // Zoom factors scale the default globe size. Tuned so tracked
+            // moving objects fill a useful chunk of the viewport — earlier
+            // values were too timid and the target looked like a speck.
             const zoomByLayer = {
-              iss: 1.6, sat: 1.6, country: 1.8,
-              event: 2.5, lake: 2.5, quake: 3,
-              flight: 3, city: 3.5, ship: 4, camera: 4,
+              iss: 3, sat: 3, country: 2.5,
+              event: 4, lake: 4, quake: 5,
+              flight: 6, city: 6, ship: 7, camera: 7,
             };
             const labelFor = (it, l) => {
               switch (l) {
@@ -1202,6 +1226,7 @@ function App() {
           layers={layers}
           autoRotate={autoRotate}
           onInteract={stopAutoRotate}
+          onUserPan={() => setFocusTarget(null)}
           zoomOutSignal={zoomOutSignal}
         />
       </div>
