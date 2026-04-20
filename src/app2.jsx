@@ -539,11 +539,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       <GlyphSVG kind={glyph} color={col} size={14}/>
                     </span>
                     <span className="text-sm flex-1">{label}</span>
-                    {/* "M3.0+" current-value pill — hidden while the
-                        seismic slider is disabled; the layer still
-                        filters by `seismicMin` (loaded from localStorage
-                        or the 3.0 default), just no UI to adjust. */}
-                    {false && k === 'quakes' && (
+                    {k === 'quakes' && (
                       <span className="font-mono text-[10px] tabular-nums text-accent-500 shrink-0">
                         M{seismicMin.toFixed(1)}+
                       </span>
@@ -708,12 +704,10 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       </label>
                     </div>
                   )}
-                  {/* Seismic magnitude floor slider — disabled for now.
-                      `seismicMin` state still exists (default from
-                      localStorage or "3.0+") so the quake layer still
-                      filters correctly; just no UI to adjust it. Restore
-                      by flipping `false` to `k === 'quakes' && layers.quakes`. */}
-                  {false && k === 'quakes' && layers.quakes && (
+                  {/* Seismic magnitude floor — only the quake layer gets a
+                      secondary control. Placed directly below the toggle so
+                      the visual grouping ("this modifies THAT") is obvious. */}
+                  {k === 'quakes' && layers.quakes && (
                     <div className="px-2 pb-1.5 pt-0.5">
                       <input type="range" min="0" max="9" step="0.5"
                              value={seismicMin}
@@ -1777,19 +1771,40 @@ function TimeSlider({ nowCursor, setNowCursor, playing, setPlaying, playSpeed, s
   );
 }
 
-function Ticker({ items }) {
+function Ticker({ items, onPick }) {
   if (!items || !items.length) return null;
+  // Duplicate so the CSS `tk 90s linear infinite` animation can scroll
+  // through once and wrap back to the start seamlessly without a gap.
   const rows = [...items, ...items];
   return (
     <div className="glass rounded-full overflow-hidden tk-mask">
       <div className="flex items-center py-2 tk-row whitespace-nowrap gap-8 px-4">
-        {rows.map((it,i)=>(
-          <span key={i} className="inline-flex items-center gap-2 text-[11px] font-mono">
-            <span className="text-accent-500">●</span>
-            <span className="opacity-50">{it.tag}</span>
-            <span className="opacity-90">{it.text}</span>
-          </span>
-        ))}
+        {rows.map((it, i) => {
+          // Clickable entries get button semantics + hover affordance;
+          // non-pickable ones (no coords or no underlying item) fall
+          // back to a plain span so keyboard users aren't asked to
+          // focus something that does nothing.
+          const pickable = !!onPick && (!!it.coords || !!it._item);
+          const content = (
+            <>
+              <span className="text-accent-500">●</span>
+              <span className="opacity-50">{it.tag}</span>
+              <span className="opacity-90">{it.text}</span>
+            </>
+          );
+          return pickable ? (
+            <button key={i}
+              onClick={(e) => { e.stopPropagation(); onPick(it); }}
+              title={`${it.tag ? it.tag + ' · ' : ''}${it.text} — click to track`}
+              className="inline-flex items-center gap-2 text-[11px] font-mono cursor-pointer hover:opacity-100 hover:text-accent-500 transition focus:outline-none focus:ring-1 focus:ring-accent-500/40 rounded">
+              {content}
+            </button>
+          ) : (
+            <span key={i} className="inline-flex items-center gap-2 text-[11px] font-mono">
+              {content}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
@@ -2238,12 +2253,113 @@ function App() {
         title: `Planetary K-index ${k.kp?.toFixed(1)}`,
         sub: k.kp >= 5 ? 'storm conditions' : k.kp >= 4 ? 'unsettled' : 'quiet',
       }]);
-      // Build ticker from top items
+      // Build ticker — merge every "emergency event" signal we have into
+      // a single time-sorted stream, newest first. Each source is
+      // admission-filtered to something genuinely urgent (strong quakes,
+      // active disasters, ongoing outages, violent conflict, geomag
+      // storms). Each pickable entry carries coords + layer + _item so
+      // clicking flies the camera to the target and opens the dossier.
       const tk = [];
-      q.slice(0,6).forEach(qk => tk.push({ tag:`M${qk.mag?.toFixed(1)}`, text: qk.place }));
-      e.slice(0,6).forEach(ev => tk.push({ tag: ev.category.toUpperCase().slice(0,4), text: ev.title }));
-      if (k) tk.push({ tag:'Kp', text:`planetary K-index ${k.kp?.toFixed(1)}` });
-      setTicker(tk);
+      // Seismic — M4.5+ only. Below that, quakes are rarely felt widely
+      // and would swamp everything else at the default 30-entry cap.
+      (q || []).forEach(qk => {
+        if ((qk.mag || 0) < 4.5 || !qk.time) return;
+        tk.push({
+          t: qk.time,
+          tag: `M${qk.mag.toFixed(1)}`,
+          text: qk.place || 'Seismic event',
+          layer: 'quake',
+          coords: [qk.lon, qk.lat],
+          _item: { ...qk, _layer: 'quake' },
+        });
+      });
+      // Natural events (EONET) — wildfires / severe storms / volcanoes /
+      // sea ice. All get through; they're self-filtering (NASA only
+      // publishes stuff that actually happened).
+      (e || []).forEach(ev => {
+        const t = new Date(ev.time).getTime(); if (!isFinite(t)) return;
+        tk.push({
+          t,
+          tag: (ev.category || 'EVENT').toUpperCase().slice(0, 4),
+          text: ev.title,
+          layer: 'event',
+          coords: [ev.lon, ev.lat],
+          _item: { ...ev, _layer: 'event' },
+        });
+      });
+      // Active tropical cyclones — named storms only. Classification
+      // ("Hurricane", "Typhoon") makes the tag; the name itself is the
+      // text ("Hurricane · Maria").
+      (cy || []).forEach(c => {
+        if (!c.name) return;
+        const t = c.time || Date.now();
+        tk.push({
+          t,
+          tag: (c.classification || 'STORM').toUpperCase().slice(0, 6),
+          text: c.name,
+          layer: 'cyclone',
+          coords: [c.lon, c.lat],
+          _item: { ...c, _layer: 'cyclone' },
+        });
+      });
+      // Conflict news — two admission paths:
+      //   • tier-3 severity always (CAMEO 18 Assault, 19 Fight, 20 Mass
+      //     violence) regardless of coverage
+      //   • lower-tier conflict (14 Protest, 15 Force posture, 16
+      //     Reduce relations, 17 Coerce) only when coverage is heavy
+      //     enough to signal "news the world is watching" — 10+
+      //     mentions within the last 2 hours. This catches
+      //     widely-reported protests, sanctions, diplomatic breaks
+      //     without letting every routine demonstration or statement
+      //     through.
+      const CONFLICT_TAGS = {
+        14:'PROTEST', 15:'FORCE', 16:'RELS', 17:'COERCE',
+        18:'ASLT',    19:'FIGHT', 20:'MASS',
+      };
+      const conflictCutoff = Date.now() - 2 * 60 * 60 * 1000;
+      (nw || []).forEach(n => {
+        if (!n.time) return;
+        const isTier3 = n.rootCode >= 18 && n.rootCode <= 20;
+        const isHeavyRecent = n.rootCode >= 14 && n.rootCode <= 17
+                           && (n.mentions || 0) >= 10
+                           && n.time >= conflictCutoff;
+        if (!isTier3 && !isHeavyRecent) return;
+        tk.push({
+          t: n.time,
+          tag: CONFLICT_TAGS[n.rootCode] || 'NEWS',
+          text: n.summary || n.place || 'Incident',
+          layer: 'news',
+          coords: [n.lon, n.lat],
+          _item: { ...n, _layer: 'news' },
+        });
+      });
+      // Internet outages — only ongoing incidents; resolved ones aren't
+      // live emergencies anymore. Country name lives in locations[0].
+      // No coords (they're country-centred on the globe via a separate
+      // centroid map), so the entry is dossier-only on click.
+      (ou || []).forEach(o => {
+        if (!o.ongoing) return;
+        const t = o.time || Date.now();
+        tk.push({
+          t,
+          tag: 'NET',
+          text: `Outage · ${o.locations?.[0]?.name || 'country'}`,
+          layer: 'outage',
+          _item: { ...o, _layer: 'outage' },
+        });
+      });
+      // Geomagnetic storm — only Kp ≥ 5 (NOAA storm threshold).
+      // Kp is planetary, not local; no coords so not pickable.
+      if (k && (k.kp || 0) >= 5) {
+        const t = new Date(k.time).getTime() || Date.now();
+        tk.push({ t, tag: 'Kp', text: `Geomagnetic storm · K-index ${k.kp.toFixed(1)}`, layer: 'kp' });
+      }
+      // Sort by timestamp descending (latest first) and cap — a ticker
+      // that scrolls through >30 entries takes too long to loop for the
+      // glance-and-go use case. Strip the sort-key `t` from shipped
+      // entries since the Ticker component doesn't use it.
+      tk.sort((a, b) => b.t - a.t);
+      setTicker(tk.slice(0, 30).map(({ t, ...rest }) => rest));
     };
     loadAll();
     const id = setInterval(loadAll, 90000);
@@ -2686,7 +2802,26 @@ function App() {
 
       {/* Bottom controls */}
       <div className="absolute bottom-4 inset-x-0 z-10 flex flex-col items-center gap-3 pointer-events-none px-2">
-        {TWEAK_DEFAULTS.showTicker && <div className="pointer-events-auto w-[min(780px,94vw)]"><Ticker items={ticker}/></div>}
+        {TWEAK_DEFAULTS.showTicker && (
+          <div className="pointer-events-auto w-[min(780px,94vw)]">
+            {/* onPick: fly camera to the event, auto-enable the matching
+                layer (via handleLocate), and open the dossier. Same
+                pattern LiveFeed uses, so the two surfaces feel
+                equivalent. Entries without coords (outages / Kp storms)
+                still open the dossier; they just don't fly the camera. */}
+            <Ticker items={ticker} onPick={(it) => {
+              if (it.coords && isFinite(it.coords[0]) && isFinite(it.coords[1])) {
+                handleLocate({
+                  type: it.layer,
+                  label: it.text,
+                  coords: it.coords,
+                  zoom: lockZoom(it.layer),
+                });
+              }
+              if (it._item) setPicked(it._item);
+            }}/>
+          </div>
+        )}
         {/* Time slider (play/pause + scrub) disabled for now — wrap in
             `{false && (...)}` so the state / effect wiring above keeps
             working (nowCursor still ticks live) and this block can be
