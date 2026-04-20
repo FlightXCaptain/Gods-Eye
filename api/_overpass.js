@@ -33,7 +33,16 @@ export async function loadOverpassDataset(ds) {
     try {
       const r = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          // Overpass rejects default Node fetch with HTTP 406 Not
+          // Acceptable unless Accept is explicitly application/json
+          // and a User-Agent identifying the caller is provided.
+          // Without these, production refineries/dams fetches fail
+          // silently and the layer renders empty.
+          'Accept': 'application/json',
+          'User-Agent': 'gods-eye/1.0 (+https://github.com/FlightXCaptain/gods-eye)',
+        },
         body: 'data=' + encodeURIComponent(ds.query),
       });
       if (!r.ok) { lastErr = new Error(`overpass ${endpoint} ${r.status}`); continue; }
