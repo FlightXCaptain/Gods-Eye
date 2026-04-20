@@ -1,9 +1,17 @@
 # Critical Infrastructure Layer — Design
 
-**Status:** Approved (brainstorm)
+**Status:** Approved (brainstorm); Phase 1 shipped (#90); Phase 2 in planning
 **Date:** 2026-04-20
 **Scope:** UI refactor + 6 new data layers + migration
 **Author:** Lachlan + Claude
+
+## Design revision 2026-04-20 (post-Phase-1)
+
+After Phase 1 shipped, the chevron-expand/collapse affordance was dropped in favour of the established app-wide pattern used by Flights and Ships sub-filters: **sub-options appear automatically when the parent layer's checkbox is on**, and disappear when it's off. There is no separate expand/collapse control.
+
+Rationale: consistency with existing layer UX beats the additional vertical-space control the chevron was introduced to provide. The 10-item future sub-panel remains manageable when gated by the parent checkbox alone (users only expand a sub-panel by enabling the feature they want to see on the globe).
+
+Sections 6.2 and 6.3 below describe the original chevron design; they are superseded by this revision. The revised behaviour is: the sub-panel renders as an indented block below the parent row **iff `layers.infrastructure === true`**. Phase 2 Task 0 removes the chevron UI + state hook from the Phase 1 code.
 
 ## 1. Summary
 
