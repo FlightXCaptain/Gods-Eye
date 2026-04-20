@@ -1427,7 +1427,7 @@ function Globe({
         // coords combined; re-projecting them every overlay frame was a
         // real tax. On the basemap they only cost on view change (now
         // properly LOD-throttled during auto-rotate too).
-        if (layers.cables && Array.isArray(data.cables) && data.cables.length) {
+        if (layers.infrastructure && layers.cables && Array.isArray(data.cables) && data.cables.length) {
           bctx.save();
           bctx.lineWidth = 0.7;
           // Group by TeleGeography's per-route color — ~20 hues across
@@ -2106,7 +2106,7 @@ function Globe({
       // Nuclear reactors (GeoNuclearData). Color by operational status,
       // size subtly scaled with net MWe. Always-visible (no LOD cluster)
       // because the global fleet is only ~800 reactors.
-      if (layers.reactors && Array.isArray(data.reactors) && data.reactors.length) {
+      if (layers.infrastructure && layers.reactors && Array.isArray(data.reactors) && data.reactors.length) {
         const statusColor = (s) => {
           s = (s || '').toLowerCase();
           if (s.includes('operational')) return '#22c55e';       // green
@@ -2133,7 +2133,7 @@ function Globe({
       // ~10 k plants globally, so we LOD-cluster at low zoom: at zoom <3
       // we thin-render to one point per ~0.5° cell; at zoom ≥3 we draw
       // everything in view. Color by primary fuel.
-      if (layers.plants && Array.isArray(data.plants) && data.plants.length) {
+      if (layers.infrastructure && layers.plants && Array.isArray(data.plants) && data.plants.length) {
         const fuelColor = (f) => {
           f = (f || '').toLowerCase();
           if (f === 'coal')                              return '#525252';  // zinc
@@ -2441,7 +2441,7 @@ function Globe({
       // LOD-decimated because PeeringDB alone is ~4500 points; dense
       // metros (London, NYC, Frankfurt, Singapore) would otherwise merge
       // into solid blobs at world zoom.
-      if (layers.datacenters && datacentersRef.current && datacentersRef.current.length) {
+      if (layers.infrastructure && layers.datacenters && datacentersRef.current && datacentersRef.current.length) {
         const dcColor = (src) => src === 'hyperscaler'
           ? 'rgba(186, 230, 253, 0.95)'   // cool light blue — cloud regions
           : 'rgba(94, 234, 212, 0.85)';    // teal — PeeringDB colos
