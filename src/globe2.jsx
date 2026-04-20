@@ -405,6 +405,75 @@ function iconDam(ctx, cx, cy, size, color) {
   ctx.stroke();
 }
 
+// Smelter / mill — low factory building + tall chimney with a wisp
+// of smoke. Reads as "heavy industrial" even at 6–7 px.
+function iconSmelter(ctx, cx, cy, size, color) {
+  const w = size * 1.2, h = size * 0.95;
+  ctx.fillStyle = color + 'aa';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.8;
+  // Low building (left)
+  const bw = w * 0.58, bh = h * 0.55;
+  ctx.fillRect(cx - w / 2, cy + h / 2 - bh, bw, bh);
+  ctx.strokeRect(cx - w / 2, cy + h / 2 - bh, bw, bh);
+  // Tall chimney (right)
+  const chW = w * 0.22, chH = h * 0.9;
+  ctx.fillRect(cx + w / 2 - chW, cy + h / 2 - chH, chW, chH);
+  ctx.strokeRect(cx + w / 2 - chW, cy + h / 2 - chH, chW, chH);
+  // Smoke plume curl
+  ctx.beginPath();
+  ctx.moveTo(cx + w / 2 - chW / 2, cy + h / 2 - chH);
+  ctx.quadraticCurveTo(cx + w / 2 + size * 0.15, cy + h / 2 - chH - size * 0.25, cx + w / 2 - chW / 4, cy + h / 2 - chH - size * 0.5);
+  ctx.stroke();
+}
+
+// Mine — inverted triangle with a horizontal rim and faint inner lines,
+// reading as "open pit / shaft opening".
+function iconMine(ctx, cx, cy, size, color) {
+  const w = size * 1.25, h = size * 1.0;
+  ctx.fillStyle = color + 'aa';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(cx - w / 2, cy - h / 2);
+  ctx.lineTo(cx + w / 2, cy - h / 2);
+  ctx.lineTo(cx, cy + h / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Inner "pit" V
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.3, cy - h / 2);
+  ctx.lineTo(cx, cy + h * 0.15);
+  ctx.lineTo(cx + w * 0.3, cy - h / 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Cement plant — cylindrical silo with a rounded/conical top. Common
+// cement-plant silhouette; distinct from refinery column (rectangular).
+function iconCement(ctx, cx, cy, size, color) {
+  const w = size * 0.75, h = size * 1.1;
+  ctx.fillStyle = color + 'aa';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(cx - w / 2, cy + h / 2);
+  ctx.lineTo(cx - w / 2, cy - h * 0.25);
+  ctx.quadraticCurveTo(cx, cy - h / 2 - size * 0.1, cx + w / 2, cy - h * 0.25);
+  ctx.lineTo(cx + w / 2, cy + h / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Banding line
+  ctx.beginPath();
+  ctx.moveTo(cx - w / 2, cy);
+  ctx.lineTo(cx + w / 2, cy);
+  ctx.stroke();
+}
+
 // Port — classic anchor silhouette (ring + shaft + cross bar + flukes).
 function iconPort(ctx, cx, cy, size, color) {
   const r = size * 0.5;
@@ -432,13 +501,12 @@ function iconPort(ctx, cx, cy, size, color) {
 }
 
 // City — 5-point star, universal cartographic convention for populated
-// places. Drawn inscribed in a circle of `size` radius; inner points at
-// 42 % of outer for classical proportion. Called from the populated-
-// places render loop where fillStyle/strokeStyle are set once for all
-// cities in the frame, so this helper only builds the path + strokes.
+// places. Inner/outer ratio 0.5 makes the star read as "fuller" (less
+// spidery) at small sizes. fillStyle/strokeStyle are set once for all
+// cities in the frame; this helper only builds the path + paints.
 function iconCity(ctx, cx, cy, size) {
   const outer = size;
-  const inner = size * 0.42;
+  const inner = size * 0.5;
   ctx.beginPath();
   for (let i = 0; i < 10; i++) {
     const r = i % 2 === 0 ? outer : inner;
@@ -1702,9 +1770,9 @@ function Globe({
             zoomB >= 4 ? 8 :
             zoomB >= 3 ? 6 :
             zoomB >= 2.4 ? 4 : 2;
-          bctx.fillStyle = isDark ? 'rgba(253,224,71,0.95)' : 'rgba(180,83,9,0.95)';
-          bctx.strokeStyle = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.85)';
-          bctx.lineWidth = 0.8;
+          bctx.fillStyle = isDark ? 'rgba(253,224,71,1)' : 'rgba(180,83,9,1)';
+          bctx.strokeStyle = isDark ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.95)';
+          bctx.lineWidth = 1.1;
           bctx.font = `500 ${zoomB >= 3 ? 10 : 9}px Geist Mono, monospace`;
           bctx.textBaseline = 'middle';
           for (const f of citiesRef.current.features) {
@@ -1714,10 +1782,11 @@ function Globe({
             const [lon, lat] = f.geometry.coordinates;
             if (!visibleOn(projection, lon, lat)) continue;
             const pt = projection([lon, lat]); if (!pt) continue;
-            // Star size scales with rank — world cities + megacities bigger,
-            // smaller regional cities more restrained. Slightly larger than
-            // the old dot radii because a star has more negative space.
-            const starR = sr <= 1 ? 3.6 : sr <= 3 ? 2.8 : 2.1;
+            // Star size scales with rank. Generously sized because a
+            // 5-point star at small radii has significant negative
+            // space between the points — a "r=5" star has roughly the
+            // visual weight of a "r=3" filled circle.
+            const starR = sr <= 1 ? 5.5 : sr <= 3 ? 4.2 : 3.2;
             iconCity(bctx, pt[0], pt[1], starR);
             cityHitsRef.current.push({
               x: pt[0], y: pt[1],
@@ -2386,6 +2455,64 @@ function Globe({
           const pt = projection([f.lon, f.lat]); if (!pt) continue;
           iconFab(octx, pt[0], pt[1], 8, '#a78bfa');
           pushHit(pt[0], pt[1], 8, 'fab', f);
+        }
+      }
+
+      // Smelters & mills (OSM Overpass, ~250 entries). Metal smelters
+      // (steel, aluminium, copper) and sugar refineries / mills — the
+      // non-oil half of `industrial=refinery`. LOD cell-dedup at low
+      // zoom for readability.
+      if (layers.infrastructure && layers.smelters && Array.isArray(data.smelters) && data.smelters.length) {
+        const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.6 : 1.4;
+        const cell = new Map();
+        for (const s of data.smelters) {
+          if (!visibleOn(projection, s.lon, s.lat)) continue;
+          if (cellDeg === 0) { cell.set(s.id, s); continue; }
+          const key = Math.round(s.lon / cellDeg) + '|' + Math.round(s.lat / cellDeg);
+          if (!cell.has(key)) cell.set(key, s);
+        }
+        for (const s of cell.values()) {
+          const pt = projection([s.lon, s.lat]); if (!pt) continue;
+          iconSmelter(octx, pt[0], pt[1], 7, '#94a3b8');
+          pushHit(pt[0], pt[1], 8, 'smelter', s);
+        }
+      }
+
+      // Cement plants (OSM Overpass, ~465 entries). Silo icon. LOD
+      // cell-dedup at low zoom.
+      if (layers.infrastructure && layers.cement && Array.isArray(data.cement) && data.cement.length) {
+        const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.6 : 1.4;
+        const cell = new Map();
+        for (const c of data.cement) {
+          if (!visibleOn(projection, c.lon, c.lat)) continue;
+          if (cellDeg === 0) { cell.set(c.id, c); continue; }
+          const key = Math.round(c.lon / cellDeg) + '|' + Math.round(c.lat / cellDeg);
+          if (!cell.has(key)) cell.set(key, c);
+        }
+        for (const c of cell.values()) {
+          const pt = projection([c.lon, c.lat]); if (!pt) continue;
+          iconCement(octx, pt[0], pt[1], 7, '#d4d4d8');
+          pushHit(pt[0], pt[1], 8, 'cement', c);
+        }
+      }
+
+      // Mines (OSM Overpass, ~3,000 named mines globally). Inverted-
+      // triangle "open pit" icon. Aggressive LOD cell-dedup at low
+      // zoom — mining regions (Andes, Western Australia, Congo Belt)
+      // would otherwise obliterate the map.
+      if (layers.infrastructure && layers.mines && Array.isArray(data.mines) && data.mines.length) {
+        const cellDeg = zoom >= 4 ? 0 : zoom >= 3 ? 0.3 : zoom >= 2 ? 0.8 : 2.0;
+        const cell = new Map();
+        for (const m of data.mines) {
+          if (!visibleOn(projection, m.lon, m.lat)) continue;
+          if (cellDeg === 0) { cell.set(m.id, m); continue; }
+          const key = Math.round(m.lon / cellDeg) + '|' + Math.round(m.lat / cellDeg);
+          if (!cell.has(key)) cell.set(key, m);
+        }
+        for (const m of cell.values()) {
+          const pt = projection([m.lon, m.lat]); if (!pt) continue;
+          iconMine(octx, pt[0], pt[1], 7, '#78716c');
+          pushHit(pt[0], pt[1], 8, 'mine', m);
         }
       }
 
@@ -3434,6 +3561,15 @@ function Globe({
             <span>{hover.name}{hover.type ? ` · ${hover.type}` : ''}{hover.capacity_mtpa ? ` · ${hover.capacity_mtpa} mtpa` : ''}</span>
           )}
           {hover._layer === 'gasproc' && (
+            <span>{hover.name}{hover.operator ? ` · ${hover.operator}` : ''}{hover.country ? ` · ${hover.country}` : ''}</span>
+          )}
+          {hover._layer === 'smelter' && (
+            <span>{hover.name}{hover.kind ? ` · ${hover.kind}` : ''}{hover.operator ? ` · ${hover.operator}` : ''}</span>
+          )}
+          {hover._layer === 'mine' && (
+            <span>{hover.name}{hover.resource ? ` · ${hover.resource}` : ''}{hover.operator ? ` · ${hover.operator}` : ''}</span>
+          )}
+          {hover._layer === 'cement' && (
             <span>{hover.name}{hover.operator ? ` · ${hover.operator}` : ''}{hover.country ? ` · ${hover.country}` : ''}</span>
           )}
           {hover._layer === 'dam' && (
