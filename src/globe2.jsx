@@ -859,15 +859,15 @@ function Globe({
   // focused on a flight or when the aircraft has no recent logged flight.
   const flightRouteRef = useRef(null);
   useEffect(() => {
-    if (focusTarget?.trackLayer !== 'flight' || !focusTarget.trackId) {
+    if (focusTarget?.trackLayer !== 'flight' || !focusTarget.callsign) {
       flightRouteRef.current = null;
       return;
     }
     if (typeof window.getFlightRoute !== 'function') return;
-    const reqIcao = focusTarget.trackId;
+    const reqCall = focusTarget.callsign;
     let cancelled = false;
-    window.getFlightRoute(reqIcao).then((route) => {
-      if (cancelled || focusTarget?.trackId !== reqIcao) return;
+    window.getFlightRoute(reqCall).then((route) => {
+      if (cancelled || focusTarget?.callsign !== reqCall) return;
       flightRouteRef.current = route || null;
     }).catch(() => {});
     return () => { cancelled = true; };
