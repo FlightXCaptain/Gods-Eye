@@ -1,8 +1,6 @@
 {
   "functions": {
-    "api/flights-stream.js":    { "memory": 256, "maxDuration": 120 },
-    "api/ships-stream.js":      { "memory": 256, "maxDuration": 120 },
-    "api/lightning-stream.js":  { "memory": 192, "maxDuration": 120 },
+    "api/stream.js":            { "memory": 320, "maxDuration": 120 },
 
     "api/flight-route.js":      { "memory": 512, "maxDuration": 20 },
 
