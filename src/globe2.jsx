@@ -1340,7 +1340,13 @@ function Globe({
       // are cheap enough to remove the throttle entirely. Keeping
       // basemap and overlays frame-locked is the only way to
       // eliminate the strobe.
-      if (dirtyBase.current) {
+      //
+      // 16 ms cap (≈60 fps) clamps the redraw rate on 120 Hz
+      // monitors where RAF would otherwise fire 120×/s — basemap
+      // doesn't need to redraw faster than the eye can integrate,
+      // and the doubled work was perceived as jank.
+      const BASE_REDRAW_MIN_MS = 16;
+      if (dirtyBase.current && (tickNow - lastBaseRedrawMsRef.current) >= BASE_REDRAW_MIN_MS) {
         lastBaseRedrawMsRef.current = tickNow;
         bctx.clearRect(0,0,width,height);
         const path = d3.geoPath(projection, bctx);
@@ -1645,17 +1651,16 @@ function Globe({
           if (!visibleOn(projection, p.lon, p.lat)) { p.prevX = null; p.prevY = null; continue; }
           const pt = projection([p.lon, p.lat]);
           if (!pt) continue;
-          // Two reasons to skip the connecting line but still update prev:
-          //   1. Active view motion — drag/pinch/auto-rotate-spin moves
-          //      every particle's screen position together. Drawing
-          //      lines during motion smears the whole canvas (the
-          //      "messy lines while dragging" complaint). prev still
-          //      updates so as soon as motion stops the next frame
-          //      paints a fresh, correctly-anchored stroke.
-          //   2. Per-particle teleport guard — lon-180 wrap or sudden
-          //      individual jump > TELEPORT_PX would draw a streak
-          //      across the canvas.
-          if (!recentlyMoved && p.prevX != null && p.prevY != null) {
+          // Per-particle teleport guard — lon-180 wrap or a sudden
+          // user drag puts prev → current >TELEPORT_PX apart; drawing
+          // that line would smear a streak across the canvas. Skip
+          // the line, but keep prev updated so the next frame paints
+          // a fresh correctly-anchored stroke.
+          //
+          // Auto-rotate's tiny 0.067°/frame motion stays well under
+          // the threshold, so particles render normally during the
+          // default idle state.
+          if (p.prevX != null && p.prevY != null) {
             const dx = pt[0] - p.prevX, dy = pt[1] - p.prevY;
             if (dx*dx + dy*dy < TELEPORT_PX*TELEPORT_PX) {
               wctx.beginPath();
@@ -1751,9 +1756,8 @@ function Globe({
           if (!visibleOn(projection, p.lon, p.lat)) { p.prevX = null; p.prevY = null; continue; }
           const pt = projection([p.lon, p.lat]);
           if (!pt) continue;
-          // Same drag-skip + per-particle teleport guard as the wind
-          // block — see comment above for rationale.
-          if (!recentlyMoved && p.prevX != null && p.prevY != null) {
+          // Per-particle teleport guard — see wind block above.
+          if (p.prevX != null && p.prevY != null) {
             const dx = pt[0] - p.prevX, dy = pt[1] - p.prevY;
             if (dx*dx + dy*dy < TELEPORT_PX*TELEPORT_PX) {
               wctx.beginPath();
@@ -2246,7 +2250,10 @@ function Globe({
             arr.push(o);
             byAnchor.set(code, arr);
           }
-          const pulse = (Math.sin(now / 600) + 1) * 0.5; // 0..1, ~1 s period
+          // Slower, gentler pulse than before. Old period (~3.7 s, alpha
+          // 0..0.55) felt twitchy on a globe with multiple ongoing
+          // outages all blinking out of phase.
+          const pulse = (Math.sin(now / 1200) + 1) * 0.5; // 0..1, ~7.5 s period
           for (const [code, list] of byAnchor) {
             const c = centroids.get(code);
             const pt = projection([c[0], c[1]]);
@@ -2282,10 +2289,13 @@ function Globe({
               // still render as the static icon so historical context
               // reads clearly when scrubbing the feed.
               if (o.ongoing) {
-                const r = 3 + pulse * 7;
-                const a = (1 - pulse) * 0.55;
+                // Smaller radius range, lower max alpha than before so
+                // the halo reads as a soft breathing ring rather than a
+                // strobe.
+                const r = 4 + pulse * 4;
+                const a = (1 - pulse) * 0.35;
                 octx.strokeStyle = causeColor + Math.round(a * 255).toString(16).padStart(2, '0');
-                octx.lineWidth = 1.1;
+                octx.lineWidth = 1.0;
                 octx.beginPath();
                 octx.arc(px, py, r, 0, Math.PI * 2);
                 octx.stroke();
