@@ -364,7 +364,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
         <Icon name="layers" />
       </IconBtn>
       {open && (
-        <>
           <div className="absolute z-50 top-12 right-0 w-60 max-h-[70vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
             <div className="text-[10px] uppercase font-mono opacity-50 mb-2 tracking-wider shrink-0">Layers</div>
             <div className="space-y-0.5 overflow-y-auto scroll flex-1 -mr-1 pr-1">
