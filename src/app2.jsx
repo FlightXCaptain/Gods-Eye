@@ -332,10 +332,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                          newsFilters, setNewsFilters,
                          dcFilters, setDcFilters }) {
   const [open, setOpen] = useState(false);
-  // Expand/collapse for the Critical Infrastructure sub-panel. Independent
-  // of `open` (popover visibility) and of `layers.infrastructure` (master
-  // gate) — users can inspect sub-options before enabling the parent.
-  const [infraExpanded, setInfraExpanded] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
     ['ships','Ships',     'ship',    '#22d3ee'],
@@ -424,17 +420,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       <GlyphSVG kind={glyph} color={col} size={14}/>
                     </span>
                     <span className="text-sm flex-1">{label}</span>
-                    {k === 'infrastructure' && (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setInfraExpanded(x => !x); }}
-                        className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-black/10 dark:hover:bg-white/10 transition-transform"
-                        style={{ transform: infraExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
-                        aria-label={infraExpanded ? 'Collapse infrastructure sub-layers' : 'Expand infrastructure sub-layers'}
-                      >
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M3 1 L7 5 L3 9 Z"/></svg>
-                      </button>
-                    )}
                     {k === 'quakes' && (
                       <span className="font-mono text-[10px] tabular-nums text-accent-500 shrink-0">
                         M{seismicMin.toFixed(1)}+
@@ -449,7 +434,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       sub-layer is enabled, its operator filter grid nests
                       below it — preserved verbatim from the pre-refactor
                       datacenters sub-filter UI. */}
-                  {k === 'infrastructure' && infraExpanded && (
+                  {k === 'infrastructure' && layers.infrastructure && (
                     <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
                       {/* Energy group */}
                       {[
