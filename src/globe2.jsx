@@ -431,6 +431,27 @@ function iconPort(ctx, cx, cy, size, color) {
   ctx.stroke();
 }
 
+// City — 5-point star, universal cartographic convention for populated
+// places. Drawn inscribed in a circle of `size` radius; inner points at
+// 42 % of outer for classical proportion. Called from the populated-
+// places render loop where fillStyle/strokeStyle are set once for all
+// cities in the frame, so this helper only builds the path + strokes.
+function iconCity(ctx, cx, cy, size) {
+  const outer = size;
+  const inner = size * 0.42;
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const ang = (Math.PI / 5) * i - Math.PI / 2;
+    const x = cx + Math.cos(ang) * r;
+    const y = cy + Math.sin(ang) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
 // Small power-plant glyph: circle outline + bolt inside. Cheap enough to
 // draw thousands per frame for the WRI fleet layer.
 function iconPlant(ctx, cx, cy, size, color) {
@@ -1678,9 +1699,11 @@ function Globe({
             const [lon, lat] = f.geometry.coordinates;
             if (!visibleOn(projection, lon, lat)) continue;
             const pt = projection([lon, lat]); if (!pt) continue;
-            const r = sr <= 1 ? 2.6 : sr <= 3 ? 2.1 : 1.6;
-            bctx.beginPath(); bctx.arc(pt[0], pt[1], r, 0, Math.PI*2);
-            bctx.fill(); bctx.stroke();
+            // Star size scales with rank — world cities + megacities bigger,
+            // smaller regional cities more restrained. Slightly larger than
+            // the old dot radii because a star has more negative space.
+            const starR = sr <= 1 ? 3.6 : sr <= 3 ? 2.8 : 2.1;
+            iconCity(bctx, pt[0], pt[1], starR);
             cityHitsRef.current.push({
               x: pt[0], y: pt[1],
               payload: {
