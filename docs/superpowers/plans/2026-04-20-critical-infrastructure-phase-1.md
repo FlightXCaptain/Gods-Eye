@@ -14,6 +14,163 @@
 
 ---
 
+## Post-rebase amendment (2026-04-20)
+
+After the plan was written, `origin/main` advanced by 3 commits (#85, #86, #87) adding a data-centers operator-filter UI + hyperscaler status. The branch was rebased cleanly (docs-only commits had no code conflicts), but this means:
+
+1. **Line numbers in the original plan have shifted.** Canonical post-rebase line numbers:
+   - Task 1 (hydration): `src/app2.jsx:1230-1242` (was `1127-1139`).
+   - Task 2 (GlyphSVG): `src/app2.jsx:192-313`, insert before `default:` at line 313 (unchanged).
+   - Task 3 (items array): `src/app2.jsx:322-343` (was `321-342`).
+   - Task 4 (state hook): insert at `src/app2.jsx:321` after `const [open, setOpen]` (was `320`).
+   - Task 5 (chevron in label): label block at `src/app2.jsx:374-387` (was `371-397`).
+   - Task 6 (sub-panel insertion): insert the new `k === 'infrastructure'` conditional immediately after the `</label>` close on line 387, before the seismic conditional at line 391. See additional dcFilters handling below.
+   - Task 7 (globe2.jsx guards):
+     - cables: line `1430` (was `1429`).
+     - reactors: line `2109` (was `2108`).
+     - plants: line `2136` (was `2135`).
+     - datacenters: line `2444` (was `2443`).
+
+2. **Task 6 must also handle the datacenters operator sub-filter**, which was added in #85. It currently lives at `src/app2.jsx:445-490` as a `k === 'datacenters' && layers.datacenters && dcFilters && (...)` block inside `items.map`. Since Task 3 removes `datacenters` from the items array, that block will never fire — it becomes dead code.
+
+   Task 6 is therefore expanded to:
+   - Render the dcFilters operator-checkbox grid *inside the Critical Infrastructure sub-panel*, nested below the Data centers sub-checkbox row. It appears only when `layers.infrastructure && layers.datacenters`.
+   - Delete the obsolete standalone block at lines 445-490.
+
+   The grid contents (6 hyperscalers + 7 colo operator buckets) are copied verbatim from the original block — the structure is preserved, only the parent scope changes. See the revised Task 6 code block below the original Task 6 content.
+
+3. **LayersPopover function signature** at line 317 already accepts `dcFilters, setDcFilters` as props (added by #85). No signature changes needed.
+
+Where line numbers below contradict this amendment, the amendment wins.
+
+### Task 6 revised Step 2 (supersedes original)
+
+Insert the following conditional block between the `</label>` close on line 387 and the seismic conditional (`{k === 'quakes' && (`) on line 391:
+
+```jsx
+                  {/* Critical Infrastructure sub-panel. Rendered only when
+                      the chevron has been expanded, regardless of whether
+                      the parent checkbox is on (so users can inspect
+                      sub-options pre-enable). Visual groups separated by
+                      thin dividers; no group headers. When the Data centers
+                      sub-layer is enabled, its operator filter grid nests
+                      below it — preserved verbatim from the pre-refactor
+                      datacenters sub-filter UI. */}
+                  {k === 'infrastructure' && infraExpanded && (
+                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
+                      {/* Energy group */}
+                      {[
+                        ['plants',     'Power plants',      'bolt',      '#f59e0b'],
+                        ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
+                      ].map(([sk, slabel, sglyph, scol]) => (
+                        <label key={sk} className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!layers[sk]}
+                            onChange={e => setLayers(x => ({ ...x, [sk]: e.target.checked }))}
+                            className="accent-accent-500 scale-90"
+                          />
+                          <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: scol }}>
+                            <GlyphSVG kind={sglyph} color={scol} size={12}/>
+                          </span>
+                          <span className="opacity-80">{slabel}</span>
+                        </label>
+                      ))}
+                      {/* Divider between Energy and Connectivity */}
+                      <div className="border-t border-black/10 dark:border-white/10 my-1"/>
+                      {/* Connectivity group */}
+                      <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!layers.cables}
+                          onChange={e => setLayers(x => ({ ...x, cables: e.target.checked }))}
+                          className="accent-accent-500 scale-90"
+                        />
+                        <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: '#22d3ee' }}>
+                          <GlyphSVG kind="aurora" color="#22d3ee" size={12}/>
+                        </span>
+                        <span className="opacity-80">Submarine cables</span>
+                      </label>
+                      <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!layers.datacenters}
+                          onChange={e => setLayers(x => ({ ...x, datacenters: e.target.checked }))}
+                          className="accent-accent-500 scale-90"
+                        />
+                        <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: '#5eead4' }}>
+                          <GlyphSVG kind="sat" color="#5eead4" size={12}/>
+                        </span>
+                        <span className="opacity-80">Data centers</span>
+                      </label>
+                      {/* Datacenter operator sub-filter — nested below the
+                          Data centers sub-row when enabled. 6 hyperscalers +
+                          top 6 colo operators + Other bucket, preserved
+                          verbatim from pre-refactor behavior. */}
+                      {layers.datacenters && dcFilters && (
+                        <div className="pl-6 pr-0 pb-1 pt-0.5 space-y-1">
+                          <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Hyperscalers</div>
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                            {[
+                              ['aws',        'AWS',        '#ff9900'],
+                              ['azure',      'Azure',      '#0078d4'],
+                              ['gcp',        'GCP',        '#4285f4'],
+                              ['oci',        'Oracle',     '#c74634'],
+                              ['alibaba',    'Alibaba',    '#ff6a00'],
+                              ['cloudflare', 'Cloudflare', '#f48120'],
+                            ].map(([dk, dlabel, dcol]) => (
+                              <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                                <input type="checkbox" checked={dcFilters[dk] !== false}
+                                       onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
+                                       className="accent-accent-500 scale-90"/>
+                                <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: dcol }}/>
+                                <span className="opacity-80 truncate">{dlabel}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider pt-1">Colo operators (PeeringDB)</div>
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                            {[
+                              ['Equinix',        'Equinix'],
+                              ['Digital Realty', 'Digital Realty'],
+                              ['NTT',            'NTT'],
+                              ['CoreSite',       'CoreSite'],
+                              ['Telehouse',      'Telehouse'],
+                              ['Cologix',        'Cologix'],
+                              ['Other',          'Other colos'],
+                            ].map(([dk, dlabel]) => (
+                              <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                                <input type="checkbox" checked={dcFilters[dk] !== false}
+                                       onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
+                                       className="accent-accent-500 scale-90"/>
+                                <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#5eead4' }}/>
+                                <span className="opacity-80 truncate">{dlabel}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+```
+
+### Task 6 additional step: delete the obsolete standalone dcFilters block
+
+After inserting the revised sub-panel above, locate and **delete** the old standalone block in `items.map` at lines 445-490 — the block beginning with:
+
+```jsx
+                  {/* Datacenter operator sub-filter — 6 hyperscalers +
+                      top 6 colo operators + Other bucket. Grouped in
+                      two labelled sections because the mix is long. */}
+                  {k === 'datacenters' && layers.datacenters && dcFilters && (
+```
+
+and ending with the matching `)}`  two lines after the closing `</div>` on line 489. Delete all lines from the comment opener down to the `)}` inclusive. This block becomes unreachable once `datacenters` is removed from the items array in Task 3, so it must be removed.
+
+Verification for this step: after deletion, a full-text search for `k === 'datacenters'` in `src/app2.jsx` should return **zero matches**. If it returns any, the deletion was incomplete.
+
+---
+
 ## File map
 
 Only two source files are modified in Phase 1. Both already exist.
