@@ -323,6 +323,18 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <line x1="2" y1="19" x2="22" y2="19"/>
         </svg>
       );
+    case 'fab':
+      // Stylized chip: a square with four external pins per side, evoking
+      // a packaged IC. Readable at 12px inside the sub-panel.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="7" y="7" width="10" height="10" rx="1"/>
+          <line x1="4" y1="10" x2="7" y2="10"/><line x1="4" y1="14" x2="7" y2="14"/>
+          <line x1="17" y1="10" x2="20" y2="10"/><line x1="17" y1="14" x2="20" y2="14"/>
+          <line x1="10" y1="4" x2="10" y2="7"/><line x1="14" y1="4" x2="14" y2="7"/>
+          <line x1="10" y1="17" x2="10" y2="20"/><line x1="14" y1="17" x2="14" y2="20"/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -439,6 +451,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       {[
                         ['plants',     'Power plants',      'bolt',      '#f59e0b'],
                         ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
+                        ['fabs',       'Semiconductor fabs','fab',       '#a78bfa'],
                       ].map(([sk, slabel, sglyph, scol]) => (
                         <label key={sk} className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
                           <input
@@ -934,6 +947,15 @@ function Dossier({ item, onClose }) {
             </a>
           )}
         </>}
+        {layer === 'fab' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Semiconductor fab · {item.operator}</div>
+          <KV k="Process" v={`${item.node_nm} nm`}/>
+          <KV k="Wafer" v={`${item.wafer_size_mm} mm`}/>
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.operator)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
         {layer === 'city' && <>
           <div className="text-lg">{item.name}</div>
           {item.country && <div className="text-sm opacity-70">{item.country}{item.admin1 ? ` · ${item.admin1}` : ''}</div>}
@@ -1356,7 +1378,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, infrastructure:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, infrastructure:false };
     // One-shot migration: users who had any infrastructure sub-layer enabled
     // before the parent toggle existed should have the parent auto-enabled
     // on first load of this version. Detect by: `infrastructure` key absent
@@ -1644,6 +1666,7 @@ function App() {
     fetchSubmarineCables().then(c => { if (alive) setData(d => ({ ...d, cables: c })); });
     fetchNuclearReactors().then(r => { if (alive) setData(d => ({ ...d, reactors: r })); });
     fetchPowerPlants().then(p => { if (alive) setData(d => ({ ...d, plants: p })); });
+    if (typeof window.fetchFabs === 'function') window.fetchFabs().then(f => { if (alive) setData(d => ({ ...d, fabs: f })); });
     return () => { alive = false; clearInterval(id); };
   }, []);
 
