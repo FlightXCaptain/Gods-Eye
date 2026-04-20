@@ -2803,7 +2803,11 @@ function App() {
       {/* Bottom controls */}
       <div className="absolute bottom-4 inset-x-0 z-10 flex flex-col items-center gap-3 pointer-events-none px-2">
         {TWEAK_DEFAULTS.showTicker && (
-          <div className="pointer-events-auto w-[min(780px,94vw)]">
+          // Width scales up on larger viewports — more entries visible at
+          // once on desktop without forcing the user to wait for the
+          // scroll to bring the next item into frame. Mobile still uses
+          // 94vw so it doesn't run into the edge chrome.
+          <div className="pointer-events-auto w-[min(1280px,94vw)]">
             {/* onPick: fly camera to the event, auto-enable the matching
                 layer (via handleLocate), and open the dossier. Same
                 pattern LiveFeed uses, so the two surfaces feel
