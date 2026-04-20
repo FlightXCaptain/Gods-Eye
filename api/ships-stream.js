@@ -135,7 +135,11 @@ function startDbFlush() {
   if (!shipDbReady || dbFlushTimer) return;
   // Kick one flush shortly after startup so fresh instances don't wait a
   // full cycle to populate the first batch.
-  setTimeout(() => { flushToDb().catch(() => {}); }, 30 * 1000);
+  // Initial flush 30 s after instance warm — give AISStream a moment
+  // to populate SHIPS before the first DB write. unref'd so it doesn't
+  // keep an idle instance alive.
+  const initialFlush = setTimeout(() => { flushToDb().catch(() => {}); }, 30 * 1000);
+  initialFlush.unref?.();
   dbFlushTimer = setInterval(() => { flushToDb().catch(() => {}); }, DB_FLUSH_INTERVAL_MS);
   dbFlushTimer.unref?.();
   // Pruning is cheap but doesn't need to run often.
