@@ -647,14 +647,6 @@ function Globe({
   const targetRotRef = useRef([0, -15, 0]);
   const targetScaleRef = useRef(scaleRef.current);
   const dirtyBase = useRef(true);
-  // Tracks whether the previous frame was still inside the 200 ms
-  // "recentlyMoved" window. When it transitions true → false the base
-  // canvas needs one more redraw so the land LOD tier can upgrade from
-  // 110m (used during motion) to 50m/10m (used when stationary). Without
-  // this edge-detect the dirty-flag system never fires on motion-stop —
-  // nothing else writes dirtyBase once the scale/rotation lerp converges
-  // — so the higher-res tiers never actually render.
-  const wasRecentlyMovedRef = useRef(false);
   const hoverRef = useRef(null);
   const hoverAppliedRef = useRef(null); // mirrors the last value pushed into React state so the tick-loop compare avoids tearing down the RAF on every mousemove
   const [hover, setHover] = useState(null);
@@ -721,6 +713,17 @@ function Globe({
   // velocity in km/h but no heading, so we infer both from position
   // delta between successive polls.
   const issStateRef    = useRef(null);
+  // Latest-value refs for props that churn every tick (SSE snapshots,
+  // time cursor, focus target). Reading these inside the frame loop
+  // instead of closing over the prop values means we can keep them
+  // OUT of the main useEffect's dep array — so the RAF / event
+  // handler setup doesn't tear down and rebuild every time flights
+  // update (several times per second) or the clock ticks. Synced
+  // via a tiny dedicated effect below. This is the single biggest
+  // perf win on the globe render path.
+  const dataRef        = useRef(data);
+  const nowCursorRef   = useRef(nowCursor);
+  const focusTargetRef = useRef(focusTarget);
   // Base canvas redraw throttle. During idle auto-rotate we'd otherwise be
   // reparsing country / state / river / lake features 60×/sec; cap to ~30fps.
   const lastBaseRedrawMsRef = useRef(0);
@@ -751,6 +754,13 @@ function Globe({
       targetScaleRef.current = Math.min(width, height) / 2.1;
     }
   }, [zoomOutSignal, width, height]);
+
+  // Keep the latest-value refs in sync with their props. Touching the
+  // base dirty flag on data/nowCursor change ensures we repaint with
+  // the new values even without a full effect remount.
+  useEffect(() => { dataRef.current = data;           dirtyBase.current = true; }, [data]);
+  useEffect(() => { nowCursorRef.current = nowCursor; dirtyBase.current = true; }, [nowCursor]);
+  useEffect(() => { focusTargetRef.current = focusTarget; }, [focusTarget]);
 
   // Rebuild the altitude-sorted flight array only when data.flights changes.
   useEffect(() => {
@@ -1510,6 +1520,17 @@ function Globe({
         lastMoveTs = 0;
 
     const tick = () => {
+      // Pick up the latest values of frequently-changing props without
+      // relying on them being in the enclosing useEffect's dep array.
+      // See the comment where `dataRef` / `nowCursorRef` / `focusTargetRef`
+      // are declared for the why. These locals shadow the props of the
+      // same name so the rest of the (very long) tick body continues to
+      // read `data.foo`, `nowCursor`, `focusTarget` with no further
+      // changes.
+      const data        = dataRef.current;
+      const nowCursor   = nowCursorRef.current;
+      const focusTarget = focusTargetRef.current;
+
       const tickNow = performance.now();
       const frameDt = lastFrameMsRef.current ? (tickNow - lastFrameMsRef.current) / 1000 : 0;
       lastFrameMsRef.current = tickNow;
@@ -1521,21 +1542,6 @@ function Globe({
         lastMoveTs = tickNow;
       }
       const recentlyMoved = tickNow - lastMoveTs < 200;
-
-      // Edge-detect motion-stop. The land-tier selector in the base
-      // draw block below picks 110m while recentlyMoved is true and
-      // 50m/10m while false — but the dirty-flag cache is only
-      // invalidated by things that *actively change* (lerp, wheel,
-      // auto-rotate, data arrival). `recentlyMoved` flips from true
-      // to false after a 200 ms timeout with no code path writing
-      // anything, so without this one-shot dirty we'd stay frozen at
-      // whatever tier was drawn during the last motion frame (110m).
-      // Flagging dirty here guarantees the final redraw picks up the
-      // stationary-tier upgrade (50m / 10m).
-      if (wasRecentlyMovedRef.current && !recentlyMoved) {
-        dirtyBase.current = true;
-      }
-      wasRecentlyMovedRef.current = recentlyMoved;
 
       // Auto-rotate runs whenever the prop is true. Interactions flip it
       // off via onInteract (parent owns the flag). Base redraw is throttled
@@ -1702,24 +1708,31 @@ function Globe({
           bctx.restore();
         }
 
-        // Land — wireframe outline (the signature look). Tier picked
-        // per zoom + motion state:
-        //   • 110m (<200 polys, ~100 KB) — any active motion or
-        //     globe-scale zoom. Includes drag, pinch, inertial
-        //     scroll, focus tween, auto-rotate.
-        //   • 50m  (~700 polys, ~700 KB) — still, regional zoom.
-        //   • 10m  (~15 k polys, ~3 MB)  — still AND zoomed in
-        //     (≥4). The only state where Malta / Guam / Caymans
-        //     coastlines actually read at pixel scale. Bumped the
-        //     threshold from 3 → 4 because even 10m at zoom 3 hurts
-        //     FPS during the panning most users do at that zoom.
+        // Land — wireframe outline (the signature look). Tier is a
+        // *pure* function of zoomB. It used to also depend on
+        // `recentlyMoved` to drop to 110m for FPS during pan/zoom, but
+        // that produced a visible "reload" on every interaction — the
+        // map was constantly swapping between tiers, and at high zoom
+        // (where most 10m polys are off-screen anyway) the FPS argument
+        // didn't even apply. Pinning to zoomB means: once you've zoomed
+        // in far enough to warrant 10m, you keep seeing 10m, stable,
+        // across pan and further zoom within the same band.
+        //
+        // Thresholds (raised from earlier 1.4 / 4 so finer tiers only
+        // kick in when you're actually zoomed in far enough for the
+        // extra detail to *read* on screen — showing 10m at
+        // continent-scale zoom burns bytes without changing what the
+        // user sees):
+        //   • zoomB < 3  →  110m   (~100 KB, ~175 polys)   globe + default
+        //   • zoomB < 8  →  50m    (~550 KB, ~1400 polys)  regional
+        //   • zoomB ≥ 8  →  10m    (~3 MB,  ~4000 polys)   close-in
         //
         // Tiers fall back gracefully while the higher-res files are
         // still streaming.
         const landTier =
-          recentlyMoved || zoomB < 1.4 ? (landLowRef.current  || landMidRef.current || landHighRef.current) :
-          zoomB < 4                    ? (landMidRef.current  || landLowRef.current || landHighRef.current) :
-                                          (landHighRef.current || landMidRef.current || landLowRef.current);
+          zoomB < 3 ? (landLowRef.current  || landMidRef.current  || landHighRef.current) :
+          zoomB < 8 ? (landMidRef.current  || landLowRef.current  || landHighRef.current) :
+                      (landHighRef.current || landMidRef.current  || landLowRef.current);
         if (landTier) {
           landRef.current = landTier;
           bctx.beginPath(); path(landTier);
@@ -3507,7 +3520,13 @@ function Globe({
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [width, height, theme, data, projection, layers, nowCursor, animationIntensity, focusTarget]);
+    // `data`, `nowCursor`, and `focusTarget` intentionally omitted —
+    // they're read via refs inside tick() so their high update rate
+    // (SSE snapshots, 1 Hz clock, user selection) doesn't tear down
+    // the entire frame loop and re-attach the pointer/wheel handlers
+    // several times a second. That churn was the dominant cost during
+    // zoom-in interactions.
+  }, [width, height, theme, projection, layers, animationIntensity]);
 
   return (
     <div ref={wrapRef} className="grabbable select-none" style={{ position:'relative', width, height, touchAction:'none' }}>
