@@ -739,6 +739,14 @@ function Globe({
   // it was never in the main effect's dep array either, so its closure
   // capture was stale any time the effect didn't happen to remount.
   const dcFiltersRef   = useRef(dcFilters);
+  // True while the user is actively dragging or touch-panning. The
+  // frame loop's focus-tracking block reads this so a drag can actually
+  // move the camera instead of being snapped back every frame — without
+  // this, a slight drag while tracking would visibly "fight" with the
+  // tick loop and feel broken. Dropped to false on drag end so tracking
+  // resumes naturally for small drags that didn't cross the cancel
+  // threshold.
+  const draggingRef    = useRef(false);
   // Base canvas redraw throttle. During idle auto-rotate we'd otherwise be
   // reparsing country / state / river / lake features 60×/sec; cap to ~30fps.
   const lastBaseRedrawMsRef = useRef(0);
@@ -869,6 +877,10 @@ function Globe({
     window.getFlightRoute(reqCall).then((route) => {
       if (cancelled || focusTarget?.callsign !== reqCall) return;
       flightRouteRef.current = route || null;
+      // Force one redraw so the great-circle appears immediately even
+      // if nothing else is currently dirtying the base canvas (e.g. the
+      // user clicked a flight without panning or zooming).
+      dirtyBase.current = true;
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [focusTarget]);
@@ -1040,6 +1052,13 @@ function Globe({
     // Velocity tracking for inertia
     let vx = 0, vy = 0, lastMove = 0, lastMx = 0, lastMy = 0;
     let dragging = false;
+    // Drag-as-cancel-tracking threshold. A tiny drag (accidental mouse
+    // jitter, intentional small shift) shouldn't nuke focus-tracking —
+    // the user asked specifically to have tracking persist unless they
+    // *meant* to pan. `onUserPan` is only called once the cursor has
+    // moved this many pixels since start, and only once per drag.
+    const PAN_CANCEL_PX = 20;
+    let dragStartX = 0, dragStartY = 0, pannedFar = false;
 
     const drag = d3.drag()
       // Mouse only. Touch is handled by our custom pan+pinch+double-tap
@@ -1054,8 +1073,12 @@ function Globe({
       })
       .on('start', (ev) => {
         dragging = true;
+        draggingRef.current = true;
         markInteraction();
-        onUserPan?.();
+        dragStartX = ev.x; dragStartY = ev.y; pannedFar = false;
+        // Don't clear focus here any more — see PAN_CANCEL_PX logic in
+        // the `drag` event below. A mousedown alone with no movement
+        // shouldn't kill tracking.
         lastMove = performance.now();
         lastMx = ev.x; lastMy = ev.y;
         vx = 0; vy = 0;
@@ -1063,6 +1086,17 @@ function Globe({
       })
       .on('drag', (ev) => {
         markInteraction();
+        // If the cursor has moved beyond the cancel threshold since
+        // drag start, this is a deliberate pan — clear any active
+        // focus/tracking so the user regains free camera control. Only
+        // fires once per drag to avoid spamming setFocusTarget.
+        if (!pannedFar) {
+          const d = Math.hypot(ev.x - dragStartX, ev.y - dragStartY);
+          if (d > PAN_CANCEL_PX) {
+            pannedFar = true;
+            onUserPan?.();
+          }
+        }
         const now = performance.now();
         const dt = Math.max(1, now - lastMove);
         // Sensitivity scales inversely with zoom
@@ -1082,6 +1116,7 @@ function Globe({
       })
       .on('end', () => {
         dragging = false;
+        draggingRef.current = false;
         // Apply inertia — fold velocity into target delta
         const momentum = 240; // ms
         const r = rotRef.current;
@@ -1225,7 +1260,10 @@ function Globe({
         };
       } else if (e.touches.length === 1 && !pinch) {
         // Enter pan. Snap targets to current so animation doesn't fight.
-        onUserPan?.();
+        // Don't cancel focus-tracking on touchstart any more — only
+        // after the touch has moved beyond PAN_CANCEL_PX (see
+        // onTouchMove). A stationary finger on a tracked marker
+        // shouldn't eject the lock-on.
         const t = e.touches[0];
         pan = {
           id: t.identifier,
@@ -1233,7 +1271,9 @@ function Globe({
           x: t.clientX, y: t.clientY,
           lastT: performance.now(),
           vx: 0, vy: 0,
+          pannedFar: false,
         };
+        draggingRef.current = true;
         targetRotRef.current = [...rotRef.current];
       }
     };
@@ -1255,6 +1295,15 @@ function Globe({
         if (!t) return;
         e.preventDefault();
         markInteraction();
+        // Same deliberate-pan threshold as mouse drag. Past 20px from
+        // start we consider the pan intentional and cancel focus.
+        if (!pan.pannedFar) {
+          const d = Math.hypot(t.clientX - pan.startX, t.clientY - pan.startY);
+          if (d > 20) {
+            pan.pannedFar = true;
+            onUserPan?.();
+          }
+        }
         const now = performance.now();
         const dt = Math.max(1, now - pan.lastT);
         const sens = 180 / scaleRef.current;
@@ -1319,6 +1368,7 @@ function Globe({
             targetRotRef.current = [nx, ny, 0];
           }
           pan = null;
+          draggingRef.current = false;
         }
       }
 
@@ -1333,7 +1383,9 @@ function Globe({
           x: t.clientX, y: t.clientY,
           lastT: performance.now(),
           vx: 0, vy: 0,
+          pannedFar: false,
         };
+        draggingRef.current = true;
         targetRotRef.current = [...rotRef.current];
       }
     };
@@ -1584,7 +1636,11 @@ function Globe({
       // keeps the globe centred on the object as it moves. The live
       // position is also stashed in a ref so the reticle render code can
       // draw at the moving position instead of the stale dblclick coords.
-      if (focusTarget?.trackId && data) {
+      // Skip focus-tracking while the user is actively dragging/panning
+      // — we don't want to fight their input every frame. Tracking will
+      // resume on the next tick after drag end if focus wasn't cleared
+      // by the pan-cancel threshold.
+      if (focusTarget?.trackId && data && !draggingRef.current) {
         let live = null;
         switch (focusTarget.trackLayer) {
           case 'iss':    live = data.iss; break;
