@@ -332,6 +332,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['plants','Power plants', 'bolt', '#f59e0b'],
     ['news','News hotspots', 'wiki', '#ef4444'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
+    ['datacenters','Data centers', 'sat', '#5eead4'],
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
     ['wind','Wind flow',  'aurora',  '#60a5fa'],
@@ -615,6 +616,7 @@ function Dossier({ item, onClose }) {
               : layer === 'plant' ? 'Power'
               : layer === 'news' ? 'News'
               : layer === 'fire' ? 'Thermal'
+              : layer === 'datacenter' ? 'Infrastructure'
               : layer === 'sat' ? 'Satellite'
               : layer === 'city' ? 'City'
               : layer === 'country' ? 'Country'
@@ -768,6 +770,23 @@ function Dossier({ item, onClose }) {
           <KV k="Time of day" v={item.day ? 'Day pass' : 'Night pass'}/>
           <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
           <a href="https://firms.modaps.eosdis.nasa.gov/" target="_blank" rel="noopener" className="text-xs text-accent-500 underline">NASA FIRMS →</a>
+        </>}
+        {layer === 'datacenter' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">
+            {item.source === 'hyperscaler' ? 'Cloud region' : 'Peering facility'}
+          </div>
+          {item.operator && <KV k="Operator" v={item.operator.toUpperCase()}/>}
+          {item.region && <KV k="Region" v={item.region}/>}
+          {item.city && <KV k="City" v={item.city}/>}
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          {item.source === 'peeringdb' && (
+            <a href={`https://www.peeringdb.com/fac/${item.id.replace(/^peeringdb-/, '')}`}
+               target="_blank" rel="noopener" className="text-xs text-accent-500 underline">
+              PeeringDB →
+            </a>
+          )}
         </>}
         {layer === 'city' && <>
           <div className="text-lg">{item.name}</div>
@@ -1110,7 +1129,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false };
     // Merge stored preferences on top of defaults. Off-by-default layers
     // (wind, tsunamis) can be toggled on via the Layers popover and their
     // choice persists across reloads.
