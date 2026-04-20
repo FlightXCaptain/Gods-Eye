@@ -63,33 +63,47 @@ const OIL_NAME_RE = new RegExp(
   'i'
 );
 
-// Hard-reject patterns — each runs against the full name (case-insensitive).
-// Ordered so the regex compiles cleanly and the carve-outs make sense.
+// Hard-reject patterns — each runs against the NAME (after NFD normalize).
+// These catch the specific non-oil industrial categories that OSM maps
+// under `industrial=refinery` or that carry "oil" in their names but
+// refer to agricultural / food oils rather than petroleum.
 const NON_OIL_PATTERNS = [
   // Sugar / food / forestry
-  /\bsugar\b/i, /\bsucre\b/i, /\baçúcar\b/i, /\bazúcar\b/i, /\bzucker\b/i,
+  /\bsugar\b/i, /\bsucre\b/i, /\bacucar\b/i, /\bazucar\b/i, /\bzucker\b/i,
   /\bpaper[-_ ]?mill\b/i, /\bpulp[-_ ]?mill\b/i, /\bsawmill\b/i, /\bkraft\b/i,
   // Metals (smelters & refineries)
   /\bsteel\b/i, /\bstahl\b/i, /\bacier\b/i, /\bacciaio\b/i, /\bacero\b/i,
   /\bcopper\b/i, /\bkupfer\b/i, /\bcuivre\b/i, /\bcobre\b/i,
   /\baluminium\b/i, /\baluminum\b/i, /\balumina\b/i, /\bbauxite\b/i,
-  /\bsmelter\b/i, /\bfundici[óo]n\b/i, /\bfonderie\b/i, /\bschmelze\b/i,
+  /\bsmelter\b/i, /\bfundicion\b/i, /\bfonderie\b/i, /\bschmelze\b/i,
   /\blead\b/i, /\bzinc\b/i, /\bnickel\b/i,
   /\bgold\s+mine\b/i, /\bsilver\s+mine\b/i,
   // Salt / cement
   /\bsalt\b/i, /\bcement\b/i, /\bciment\b/i, /\bcemento\b/i, /\bzement\b/i,
-  // Chemical plants — but ALLOW "petrochemical" / "petrochem"
+  // Chemical plants — ALLOW "petrochemical" / "petrochem"
   /(?<!petro)(?<!petro\s)chemical[s]?\b/i,
   /(?<!petro)(?<!petro\s)chimique\b/i,
   /(?<!petro)(?<!petro\s)chimica\b/i,
   /(?<!petro)(?<!petro\s)chemie\b/i,
-  /(?<!petro)(?<!petro\s)química\b/i,
-  // Polymer / plastics plants (not oil refining even if oil-derived)
-  /\bpolymer\b/i, /\bpolimer\b/i, /\bpolym[eè]re\b/i, /\bpolypropylene\b/i, /\bpolyethylene\b/i,
-  // Tank / gas terminals — storage & distribution, not refining. Carve
-  // out "refinery terminal" and "oil terminal at refinery" patterns by
-  // checking that "terminal" isn't paired with refinery-word elsewhere
-  // in the name (done as a post-check below, not in this regex).
+  /(?<!petro)(?<!petro\s)quimica\b/i,
+  // Polymer / plastics
+  /\bpolymer\b/i, /\bpolimer\b/i, /\bpolymere\b/i, /\bpolypropylene\b/i, /\bpolyethylene\b/i,
+  // Coin / currency mints (Royal Mint, US Mint, etc.) — occasionally
+  // mis-tagged as `industrial=refinery`.
+  /\bmint\b/i, /\broyal\s*mint\b/i,
+  // Water / wastewater treatment — sometimes tagged as refinery.
+  /\bwastewater\b/i, /\bwater\s+treatment\b/i, /\bwater\s+plant\b/i, /\bsewage\b/i,
+  // Beverage distilleries (whisky / vodka / etc.) — not oil.
+  /\bdistillery\b/i, /\bdistillerie\b/i, /\bdistilleria\b/i,
+  // Agricultural / food oils — the "oil" in their name is vegetable
+  // oil, not petroleum. Palm oil mills especially get mis-tagged.
+  /\bpalm\s+oil\b/i, /\bpalm[-_\s]?kernel\b/i, /\bpalm\s+mill\b/i,
+  /\bolive\s+oil\b/i, /\bvegetable\s+oil\b/i, /\bcooking\s+oil\b/i,
+  /\bcoconut\s+oil\b/i, /\bsoybean\s+oil\b/i, /\bcanola\s+oil\b/i,
+  /\brapeseed\s+oil\b/i, /\bsunflower\s+oil\b/i, /\bpeanut\s+oil\b/i,
+  /\bmustard\s+oil\b/i, /\bcastor\s+oil\b/i, /\bcopra\b/i,
+  /\banimal\s+oil\b/i, /\bfish\s+oil\b/i, /\bessential\s+oil\b/i,
+  /\blubricat(or|ion)\s+oil\b/i,
 ];
 
 // Name signals that keep an entry even if "terminal" appears (because
@@ -146,12 +160,15 @@ function project(el) {
     return null;
   }
 
-  // Stage 3: ambiguous residuals. Prefer false negatives over false
-  // positives — only keep if there's a positive oil signal in the name
-  // or if an operator tag is present (OSM convention: operator is most
-  // often set on oil refineries, rarely on other `industrial=refinery`).
+  // Stage 3: ambiguous residuals. Keep only if there's a positive oil
+  // signal in the NAME or in the OPERATOR tag. Previous version kept
+  // anything with an operator tag set, which let coin mints / water
+  // plants / etc. through because they all have operator tags; now
+  // the operator's text must itself match the oil regex.
   const hasOilNameSignal = OIL_NAME_RE.test(nName);
-  if (hasOilNameSignal || tags.operator) return keepRecord();
+  const hasOilOperatorSignal =
+    tags.operator && OIL_NAME_RE.test(normalize(tags.operator));
+  if (hasOilNameSignal || hasOilOperatorSignal) return keepRecord();
 
   return null;
 }
