@@ -367,7 +367,38 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
       </IconBtn>
       {open && (
           <div className="absolute z-50 top-12 right-0 w-60 max-h-[70vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
-            <div className="text-[10px] uppercase font-mono opacity-50 mb-2 tracking-wider shrink-0">Layers</div>
+            <div className="flex items-center justify-between mb-2 shrink-0">
+              <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Layers</div>
+              {/* Bulk toggles — flip every layer in `items` on or off in a
+                  single setLayers call. Other state like shipFilters /
+                  flightFilters / dcFilters isn't touched because "Layers"
+                  is the top-level on/off switch per layer; sub-filters
+                  stay as the user set them. */}
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setLayers(x => {
+                    const next = { ...x };
+                    for (const [k] of items) next[k] = true;
+                    return next;
+                  })}
+                  className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 tracking-wider"
+                  title="Turn every layer on">
+                  All on
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLayers(x => {
+                    const next = { ...x };
+                    for (const [k] of items) next[k] = false;
+                    return next;
+                  })}
+                  className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-70 hover:opacity-100 tracking-wider"
+                  title="Turn every layer off">
+                  All off
+                </button>
+              </div>
+            </div>
             <div className="space-y-0.5 overflow-y-auto scroll flex-1 -mr-1 pr-1">
               {items.map(([k,label,glyph,col])=>(
                 <React.Fragment key={k}>
