@@ -1424,7 +1424,22 @@ function Globe({
     // scroll, focus-target tween) so the 10m dataset only kicks in when
     // the view is actually still. 200 ms quiet is enough to know the
     // user has stopped interacting.
-    let lastRot = [0, 0, 0], lastScale = 0, lastMoveTs = 0;
+    //
+    // Seed lastRot/lastScale from the *actual* current ref values, not
+    // from zeros. This effect tears down and re-runs whenever any of its
+    // many deps change (including `data`, which ticks on every SSE
+    // snapshot — several times per second). Re-initialising to [0,0,0]
+    // meant the first frame of every new effect instance saw
+    //   rotRef.current[0] !== 0 → "motion detected"
+    // even though nothing had moved. That bumped lastMoveTs, flipped
+    // recentlyMoved=true for 200 ms, and dropped the land tier back to
+    // 110m. With data re-triggering the effect every ~1–2 s the base
+    // flickered between 110m and 10m continuously. Seeding from the
+    // current ref values makes the first frame a no-op, and the detector
+    // only fires on genuine subsequent changes.
+    let lastRot = [rotRef.current[0], rotRef.current[1], rotRef.current[2]],
+        lastScale = scaleRef.current,
+        lastMoveTs = 0;
 
     const tick = () => {
       const tickNow = performance.now();
