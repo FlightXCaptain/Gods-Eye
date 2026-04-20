@@ -226,6 +226,44 @@ function seedHyperscalers() {
 
 // ── PeeringDB ────────────────────────────────────────────────────────
 
+// Heuristic operator extraction from PeeringDB facility names. Ordered
+// by most-specific first so "Digital Realty" doesn't lose to a bare
+// "Digital" pattern. Acquisitions are consolidated to the acquiring
+// brand (Telx / Interxion → Digital Realty; Level 3 / CenturyLink → Lumen).
+const OPERATOR_PATTERNS = [
+  ['EQUINIX',          'Equinix'],
+  ['DIGITAL REALTY',   'Digital Realty'],
+  ['INTERXION',        'Digital Realty'],
+  ['TELX',             'Digital Realty'],
+  ['NTT',              'NTT'],
+  ['CORESITE',         'CoreSite'],
+  ['COLOGIX',          'Cologix'],
+  ['TELEHOUSE',        'Telehouse'],
+  ['KDDI',             'KDDI'],
+  ['IRON MOUNTAIN',    'Iron Mountain'],
+  ['FLEXENTIAL',       'Flexential'],
+  ['GLOBAL SWITCH',    'Global Switch'],
+  ['COLT',             'Colt'],
+  ['LUMEN',            'Lumen'],
+  ['CENTURYLINK',      'Lumen'],
+  ['LEVEL 3',          'Lumen'],
+  ['LEVEL3',           'Lumen'],
+  ['QTS',              'QTS'],
+  ['VANTAGE',          'Vantage'],
+  ['NEXTDC',           'NextDC'],
+  ['CYXTERA',          'Cyxtera'],
+  ['ZAYO',             'Zayo'],
+  ['STT GDC',          'STT GDC'],
+];
+function extractColoOperator(name) {
+  if (!name) return 'Other';
+  const n = name.toUpperCase();
+  for (const [pat, canonical] of OPERATOR_PATTERNS) {
+    if (n.includes(pat)) return canonical;
+  }
+  return 'Other';
+}
+
 async function fetchPeeringDB() {
   try {
     const url = 'https://www.peeringdb.com/api/fac?depth=0';
@@ -251,6 +289,7 @@ async function fetchPeeringDB() {
         lon: +lon.toFixed(4),
         city: r.city || null,
         country: r.country || null,
+        operator: extractColoOperator(r.name),
         source: 'peeringdb',
       });
     }
