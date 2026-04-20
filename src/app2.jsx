@@ -310,6 +310,19 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <path d="M8 1 L3 8 L6.5 8 L5 13 L11 6 L7.5 6 L9 1 Z" fill={color}/>
         </svg>
       );
+    case 'infra':
+      // Stylized industrial silhouette: two tanks + a stack, evoking a
+      // refinery / plant footprint. Works as a generic "fixed-location
+      // infrastructure" mark since the sub-panel has its own per-layer
+      // glyphs.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="11" width="5" height="8" rx="0.5"/>
+          <rect x="16" y="8" width="5" height="11" rx="0.5"/>
+          <path d="M11 19 L11 6 L13 4 L13 19 Z"/>
+          <line x1="2" y1="19" x2="22" y2="19"/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
