@@ -807,6 +807,31 @@ const CAMEO_CONFLICT_META = [
   [20, 'Mass violence',    '#b91c1c'], // darker red — escalates severity
 ];
 
+// Derivations that fall back gracefully when the /api/gdelt proxy
+// returns the thin schema (just id / lon / lat / place / rootCode / quad
+// / goldstein / mentions / tone / url / dateAdded) without the enriched
+// fields (conflict / summary / rootName / sourceDomain / actors). The
+// popover needs these to filter, label, and display — deriving them on
+// the client keeps the UI working against either response shape and
+// means the popover doesn't silently break if the API shape changes.
+function newsIsConflict(n) {
+  return typeof n.conflict === 'boolean'
+    ? n.conflict
+    : n.rootCode >= 14 && n.rootCode <= 20;
+}
+function newsRootName(n) {
+  return n.rootName || CAMEO_CONFLICT_META.find(([c]) => c === n.rootCode)?.[1] || 'Event';
+}
+function newsDisplayTitle(n) {
+  return n.summary || `${newsRootName(n)} · ${n.place || 'Unknown location'}`;
+}
+function newsDisplayDomain(n) {
+  if (n.sourceDomain) return n.sourceDomain;
+  if (!n.url) return '';
+  const m = String(n.url).match(/^https?:\/\/([^\/?#]+)/i);
+  return m ? m[1].replace(/^www\./, '') : '';
+}
+
 // Conflict-news feed dropdown. Sits in the header action cluster next to
 // the Layers popover and surfaces the last N hours of geocoded conflict
 // events — sorted newest-first, filterable by published-time window and
@@ -863,12 +888,14 @@ function NewsPopover({ news, onPick }) {
   }, [open]);
 
   // Filtering + sort. Memoised so a typing user doesn't re-sort 1000
-  // items every keystroke elsewhere in the app.
+  // items every keystroke elsewhere in the app. Uses newsIsConflict()
+  // rather than reading n.conflict directly so the popover works against
+  // both the enriched and thin /api/gdelt response shapes.
   const items = useMemo(() => {
     if (!Array.isArray(news)) return [];
     const cutoff = Date.now() - hoursBack * 60 * 60 * 1000;
     return news
-      .filter(n => n.conflict
+      .filter(n => newsIsConflict(n)
                 && (n.time || 0) >= cutoff
                 && catFilter[n.rootCode] !== false)
       .sort((a, b) => (b.time || 0) - (a.time || 0))
@@ -884,7 +911,7 @@ function NewsPopover({ news, onPick }) {
   const windowTotal = useMemo(() => {
     if (!Array.isArray(news)) return 0;
     const cutoff = Date.now() - hoursBack * 60 * 60 * 1000;
-    return news.filter(n => n.conflict && (n.time || 0) >= cutoff).length;
+    return news.filter(n => newsIsConflict(n) && (n.time || 0) >= cutoff).length;
   }, [news, hoursBack]);
 
   return (
@@ -950,6 +977,7 @@ function NewsPopover({ news, onPick }) {
             )}
             {items.map((n) => {
               const accent = CAMEO_CONFLICT_META.find(([c]) => c === n.rootCode)?.[2] || '#ef4444';
+              const domain = newsDisplayDomain(n);
               return (
                 <button key={n.id}
                   onClick={() => { onPick?.(n); setOpen(false); }}
@@ -957,12 +985,12 @@ function NewsPopover({ news, onPick }) {
                   <div className="shrink-0 w-1.5 h-1.5 rounded-full mt-1.5" style={{ background: accent }}/>
                   <div className="flex-1 min-w-0">
                     <div className="text-[12px] leading-snug line-clamp-2">
-                      {n.summary || n.place || n.rootName || 'News event'}
+                      {newsDisplayTitle(n)}
                     </div>
                     <div className="text-[10px] opacity-55 font-mono truncate mt-0.5 flex gap-2 items-center">
                       <span>{fmtAgo(n.time)}</span>
                       {n.mentions != null && n.mentions > 1 && <span>· {n.mentions}×</span>}
-                      {n.sourceDomain && <span className="truncate">· {n.sourceDomain}</span>}
+                      {domain && <span className="truncate">· {domain}</span>}
                     </div>
                   </div>
                 </button>
@@ -1852,16 +1880,19 @@ function App() {
 
   // Double-click / double-tap on a marker → focus + track. Also stable —
   // keeps the Globe's drag listeners from being recreated on every render.
-  // Per-layer zoom presets: fast/wide targets (ISS, country) stay modest
-  // so they don't fly off-screen, stationary POIs (ship, camera) pull
-  // close so you can read the label. Dossier surfaces alongside so the
-  // user can inspect metadata while the camera tracks.
+  // Per-layer zoom presets for target lock-on. Tuned so that when a user
+  // double-clicks / focuses a target they actually see it up close rather
+  // than a dot on a continent. Tracked targets (flights, ships, sats,
+  // ISS) can safely go high since the camera keeps them centred —
+  // over-zooming static targets is fine too because nothing moves them
+  // out of frame. Country stays conservative because most countries are
+  // wider than a tight zoom frame and would clip.
   const handleFocusItem = useCallback((hit) => {
     const layer = hit._layer;
     const zoomByLayer = {
-      iss: 3, sat: 3, country: 2.5,
-      event: 4, lake: 4, quake: 5,
-      city: 6, flight: 12, ship: 14,
+      iss: 8, sat: 8, country: 4,
+      event: 10, lake: 8, quake: 12,
+      city: 14, flight: 26, ship: 30,
     };
     const labelFor = (it, l) => {
       switch (l) {
@@ -1947,16 +1978,16 @@ function App() {
 
   // Click handler for items in the NewsPopover dropdown. Focuses the
   // globe on the event's geocoded location and opens the dossier. Zoom
-  // 3 is a city-level preset that matches GDELT's ActionGeo resolution
-  // — enough to place a pin without over-committing, since most events
-  // are recorded at city accuracy rather than street level.
+  // 10 is a city-level preset that matches GDELT's ActionGeo resolution
+  // (events are geocoded to city granularity) and gives the user a
+  // genuinely close view of the region rather than a continent pin.
   const pickNewsItem = useCallback((n) => {
     if (!n || !isFinite(n.lon) || !isFinite(n.lat)) return;
     setFocusTarget({
       type: 'news',
       label: n.summary || n.place || 'News event',
       coords: [n.lon, n.lat],
-      zoom: 3,
+      zoom: 10,
     });
     setPicked({ ...n, _layer: 'news' });
   }, []);
