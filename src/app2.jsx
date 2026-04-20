@@ -316,7 +316,8 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
 
 function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                          shipFilters, setShipFilters, flightFilters, setFlightFilters,
-                         newsFilters, setNewsFilters }) {
+                         newsFilters, setNewsFilters,
+                         dcFilters, setDcFilters }) {
   const [open, setOpen] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
@@ -439,6 +440,52 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                           <span className="opacity-80 truncate">{slabel}</span>
                         </label>
                       ))}
+                    </div>
+                  )}
+                  {/* Datacenter operator sub-filter — 6 hyperscalers +
+                      top 6 colo operators + Other bucket. Grouped in
+                      two labelled sections because the mix is long. */}
+                  {k === 'datacenters' && layers.datacenters && dcFilters && (
+                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-1">
+                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Hyperscalers</div>
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                        {[
+                          ['aws',        'AWS',        '#ff9900'],
+                          ['azure',      'Azure',      '#0078d4'],
+                          ['gcp',        'GCP',        '#4285f4'],
+                          ['oci',        'Oracle',     '#c74634'],
+                          ['alibaba',    'Alibaba',    '#ff6a00'],
+                          ['cloudflare', 'Cloudflare', '#f48120'],
+                        ].map(([dk, dlabel, dcol]) => (
+                          <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                            <input type="checkbox" checked={dcFilters[dk] !== false}
+                                   onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
+                                   className="accent-accent-500 scale-90"/>
+                            <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: dcol }}/>
+                            <span className="opacity-80 truncate">{dlabel}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider pt-1">Colo operators (PeeringDB)</div>
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                        {[
+                          ['Equinix',        'Equinix'],
+                          ['Digital Realty', 'Digital Realty'],
+                          ['NTT',            'NTT'],
+                          ['CoreSite',       'CoreSite'],
+                          ['Telehouse',      'Telehouse'],
+                          ['Cologix',        'Cologix'],
+                          ['Other',          'Other colos'],
+                        ].map(([dk, dlabel]) => (
+                          <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                            <input type="checkbox" checked={dcFilters[dk] !== false}
+                                   onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
+                                   className="accent-accent-500 scale-90"/>
+                            <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#5eead4' }}/>
+                            <span className="opacity-80 truncate">{dlabel}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {k === 'news' && layers.news && (
@@ -781,6 +828,7 @@ function Dossier({ item, onClose }) {
           {item.city && <KV k="City" v={item.city}/>}
           {item.country && <KV k="Country" v={item.country}/>}
           <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          {item.source === 'hyperscaler' && <DatacenterStatus operator={item.operator} region={item.region}/>}
           {item.source === 'peeringdb' && (
             <a href={`https://www.peeringdb.com/fac/${item.id.replace(/^peeringdb-/, '')}`}
                target="_blank" rel="noopener" className="text-xs text-accent-500 underline">
@@ -877,6 +925,61 @@ function FlightRouteInfo({ icao24 }) {
 // the last 30 days of accumulated positions collected while this browser
 // was running. We can't backfill history from before first observation —
 // no free AIS historical feed exists.
+// Live status pill for hyperscaler cloud regions. Reads from the
+// datacenter-status poller (GCP + Cloudflare + Oracle + AWS covered —
+// Azure/Alibaba return "unknown"). Re-renders via the subscription so
+// the dossier updates if an incident appears/clears while it's open.
+function DatacenterStatus({ operator, region }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (typeof window.subscribeDcStatus !== 'function') return;
+    return window.subscribeDcStatus(() => setTick(x => x + 1));
+  }, []);
+  if (!operator || typeof window.getDcProviderStatus !== 'function') return null;
+  const prov = window.getDcProviderStatus(operator);
+  if (!prov) return null;
+  const regionIncidents = region && typeof window.getDcRegionIncidents === 'function'
+    ? window.getDcRegionIncidents(operator, region) : [];
+  const stateColor = {
+    operational: 'bg-emerald-500',
+    degraded:    'bg-amber-500',
+    outage:      'bg-red-500',
+    unknown:     'bg-slate-500',
+  }[prov.state] || 'bg-slate-500';
+  const stateLabel = prov.state === 'operational' ? 'Operational'
+                  : prov.state === 'degraded'   ? 'Degraded'
+                  : prov.state === 'outage'     ? 'Outage'
+                  : 'Status unknown';
+  return (
+    <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1.5">
+      <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Live status</div>
+      <div className="flex items-center gap-2">
+        <span className={classNames("w-2 h-2 rounded-full", stateColor)}/>
+        <span className="text-sm font-mono">{stateLabel}</span>
+        {prov.incidents?.length > 0 && (
+          <span className="text-[10px] font-mono opacity-60">
+            · {prov.incidents.length} active
+          </span>
+        )}
+      </div>
+      {regionIncidents.length > 0 && (
+        <div className="space-y-1 pt-1">
+          <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Affecting this region</div>
+          {regionIncidents.slice(0, 3).map(inc => (
+            <div key={inc.id} className="text-[11px] opacity-80 leading-snug">
+              {inc.title}
+              {inc.startedAt && (
+                <span className="opacity-50 font-mono"> · since {fmtTimeShort(new Date(inc.startedAt).getTime())}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {prov.note && <div className="text-[10px] opacity-50 font-mono italic">{prov.note}</div>}
+    </div>
+  );
+}
+
 function ShipHistoryStats({ mmsi }) {
   const [h, setH] = useState(null);
   useEffect(() => {
@@ -1161,6 +1264,28 @@ function App() {
     if (JSON.stringify(merged) !== JSON.stringify(flightFilters)) setFlightFilters(merged);
     localStorage.setItem('ge-flight-filters', JSON.stringify(merged));
   }, [flightFilters]);
+
+  // Datacenter filters — per-operator toggles. Keyed by the canonical
+  // operator string emitted by api/datacenters.js (lowercase for
+  // hyperscalers, title-case for PeeringDB colos). Same merge-on-load
+  // pattern so new operators (e.g. if we add Tencent later) default to
+  // visible without breaking saved state.
+  const [dcFilters, setDcFilters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ge-dc-filters')) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    const def = {
+      // Hyperscalers
+      aws:true, azure:true, gcp:true, oci:true, alibaba:true, cloudflare:true,
+      // Top colo operators (from api/datacenters.js extractColoOperator)
+      'Equinix':true, 'Digital Realty':true, 'NTT':true,
+      'CoreSite':true, 'Telehouse':true, 'Cologix':true,
+      'Other':true,
+    };
+    const merged = { ...def, ...dcFilters };
+    if (JSON.stringify(merged) !== JSON.stringify(dcFilters)) setDcFilters(merged);
+    localStorage.setItem('ge-dc-filters', JSON.stringify(merged));
+  }, [dcFilters]);
 
   // GDELT news theme (CAMEO QuadClass) + tone (negative/neutral/positive)
   // multi-selects. Defaults: all themes on, negative-only tone bias — this
@@ -1640,6 +1765,7 @@ function App() {
           onPickMarker={setPicked}
           onFocusItem={handleFocusItem}
           focusTarget={focusTarget}
+          dcFilters={dcFilters}
           theme={theme}
           animationIntensity={animIntensity}
           layers={layers}
@@ -1677,7 +1803,8 @@ function App() {
   seismicMin={seismicMin} setSeismicMin={setSeismicMin}
   shipFilters={shipFilters} setShipFilters={setShipFilters}
             newsFilters={newsFilters} setNewsFilters={setNewsFilters}
-  flightFilters={flightFilters} setFlightFilters={setFlightFilters}/>
+  flightFilters={flightFilters} setFlightFilters={setFlightFilters}
+  dcFilters={dcFilters} setDcFilters={setDcFilters}/>
             <button
               onClick={() => toggleAutoRotate()}
               title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
@@ -1709,7 +1836,8 @@ function App() {
   seismicMin={seismicMin} setSeismicMin={setSeismicMin}
   shipFilters={shipFilters} setShipFilters={setShipFilters}
             newsFilters={newsFilters} setNewsFilters={setNewsFilters}
-  flightFilters={flightFilters} setFlightFilters={setFlightFilters}/>
+  flightFilters={flightFilters} setFlightFilters={setFlightFilters}
+  dcFilters={dcFilters} setDcFilters={setDcFilters}/>
           <button
             onClick={() => toggleAutoRotate()}
             title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}

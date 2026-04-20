@@ -419,6 +419,7 @@ function Globe({
   width, height, data, nowCursor, onPickMarker, onFocusItem, focusTarget,
   theme, animationIntensity = 0.7, layers, autoRotate = true,
   onInteract, onUserPan, zoomOutSignal = 0,
+  dcFilters,
 }) {
   const wrapRef = useRef(null);
   const baseRef = useRef(null);   // land (cached, redraws on rotation)
@@ -2447,6 +2448,10 @@ function Globe({
         const dcPts = [];
         for (const d of datacentersRef.current) {
           if (typeof d.lat !== 'number' || typeof d.lon !== 'number') continue;
+          // Operator filter — skip when this company is toggled off.
+          // dcFilters may be undefined during first render; default to
+          // "show everything" in that case.
+          if (dcFilters && d.operator && dcFilters[d.operator] === false) continue;
           if (!visibleOn(projection, d.lon, d.lat)) continue;
           const pt = projection([d.lon, d.lat]); if (!pt) continue;
           dcPts.push({ px: pt[0], py: pt[1], d });
