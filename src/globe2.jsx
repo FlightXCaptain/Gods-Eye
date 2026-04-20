@@ -1844,7 +1844,7 @@ function Globe({
               const name = p.name || p.NAME || '';
               if (name) {
                 bctx.fillStyle = isDark ? 'rgba(255,255,255,0.85)' : 'rgba(15,23,42,0.9)';
-                bctx.fillText(name, pt[0] + r + 3, pt[1]);
+                bctx.fillText(name, pt[0] + starR + 3, pt[1]);
                 bctx.fillStyle = isDark ? 'rgba(253,224,71,0.95)' : 'rgba(180,83,9,0.95)';
               }
             }
