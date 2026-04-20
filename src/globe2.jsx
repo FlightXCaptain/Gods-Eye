@@ -1586,13 +1586,15 @@ function Globe({
           return [uu, vv];
         };
 
-        // Map m/s → HSL colour. Blue for calm, through cyan / green / yellow
-        // / orange / red, maxing out at "hurricane" speeds.
+        // Map m/s → HSL colour. Warm-only palette so wind never visually
+        // collides with the cool ocean current layer: pale gold for calm,
+        // through orange to deep red at hurricane speeds. (Old palette
+        // started in blue — indistinguishable from ocean at low speeds.)
         const windColor = (speed, alpha) => {
           const t = Math.min(speed / 28, 1);
-          const hue = 210 - t * 210;        // 210 blue → 0 red
-          const sat = 65 + t * 25;
-          const light = 58 + (1 - t) * 8;
+          const hue = 50 - t * 50;          // 50 gold → 0 red
+          const sat = 75 + t * 20;
+          const light = 65 - t * 15;        // brighter at low speeds, darker punch at high
           return `hsla(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%, ${alpha})`;
         };
 
@@ -1643,10 +1645,17 @@ function Globe({
           if (!visibleOn(projection, p.lon, p.lat)) { p.prevX = null; p.prevY = null; continue; }
           const pt = projection([p.lon, p.lat]);
           if (!pt) continue;
-          if (p.prevX != null && p.prevY != null) {
-            // Per-particle teleport guard — auto-rotate plus a 180°-meridian
-            // wrap can put prev → current on opposite sides of the canvas.
-            // Drawing that line would smear a streak across the globe.
+          // Two reasons to skip the connecting line but still update prev:
+          //   1. Active view motion — drag/pinch/auto-rotate-spin moves
+          //      every particle's screen position together. Drawing
+          //      lines during motion smears the whole canvas (the
+          //      "messy lines while dragging" complaint). prev still
+          //      updates so as soon as motion stops the next frame
+          //      paints a fresh, correctly-anchored stroke.
+          //   2. Per-particle teleport guard — lon-180 wrap or sudden
+          //      individual jump > TELEPORT_PX would draw a streak
+          //      across the canvas.
+          if (!recentlyMoved && p.prevX != null && p.prevY != null) {
             const dx = pt[0] - p.prevX, dy = pt[1] - p.prevY;
             if (dx*dx + dy*dy < TELEPORT_PX*TELEPORT_PX) {
               wctx.beginPath();
@@ -1685,14 +1694,15 @@ function Globe({
           return [uu, vv];
         };
 
-        // Deep-water palette: currents never get "warm". Calm flows read
-        // as deep teal; the Gulf Stream, Kuroshio, and similar jets pop
-        // bright cyan.
+        // Deep-water palette: currents never get "warm". Pushed deeper
+        // and brighter than before to stay clearly distinct from the
+        // gold/red wind palette: deep blue for calm, electric cyan for
+        // jets like the Gulf Stream and Kuroshio.
         const currentColor = (speed, alpha) => {
           const t = Math.min(speed / 1.6, 1); // cap near Kuroshio peak (~1.5 m/s)
-          const hue = 190 + t * 20;           // 190 teal → 210 cyan-blue
-          const sat = 70 + t * 20;
-          const light = 45 + t * 15;
+          const hue = 200 - t * 20;           // 200 deep cyan-blue → 180 cyan
+          const sat = 85;                     // saturated all the way through
+          const light = 40 + t * 25;          // dim depth-blue → bright cyan
           return `hsla(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%, ${alpha})`;
         };
 
@@ -1741,7 +1751,9 @@ function Globe({
           if (!visibleOn(projection, p.lon, p.lat)) { p.prevX = null; p.prevY = null; continue; }
           const pt = projection([p.lon, p.lat]);
           if (!pt) continue;
-          if (p.prevX != null && p.prevY != null) {
+          // Same drag-skip + per-particle teleport guard as the wind
+          // block — see comment above for rationale.
+          if (!recentlyMoved && p.prevX != null && p.prevY != null) {
             const dx = pt[0] - p.prevX, dy = pt[1] - p.prevY;
             if (dx*dx + dy*dy < TELEPORT_PX*TELEPORT_PX) {
               wctx.beginPath();
