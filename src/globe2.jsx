@@ -140,6 +140,25 @@ function iconIce(ctx, cx, cy, size, color) {
   ctx.fill();
 }
 
+// Lightning bolt (⚡). Six-point zigzag drawn as a filled path — recognisable
+// even at 6-8 px. `size` is the bolt's full height; width is ~0.6 × size.
+// Caller is responsible for fillStyle/strokeStyle; this just traces the path
+// so the caller can stroke-then-fill for a dark halo against bright skies
+// (strike cores are nearly-white yellow on a mostly-black ocean, but a
+// daytime terminator can push behind cities where contrast drops).
+function iconBolt(ctx, cx, cy, size) {
+  const h = size * 0.5;   // half-height
+  const w = size * 0.3;   // half-width → total width 0.6 × size
+  ctx.beginPath();
+  ctx.moveTo(cx + w * 0.4,  cy - h);          // top outer corner
+  ctx.lineTo(cx - w,        cy + h * 0.15);   // slanted down-left to waist
+  ctx.lineTo(cx - w * 0.2,  cy + h * 0.15);   // notch back right (inner waist)
+  ctx.lineTo(cx - w * 0.4,  cy + h);          // tail tip (bottom-left)
+  ctx.lineTo(cx + w,        cy - h * 0.15);   // slanted up-right (right edge)
+  ctx.lineTo(cx + w * 0.2,  cy - h * 0.15);   // notch back left (inner top)
+  ctx.closePath();
+}
+
 // Generic event: small square outline
 // Low-precision solar position (good to ~0.01° for present dates). Returns
 // the subsolar point in [lon, lat] degrees — i.e. the spot on Earth where
@@ -2313,28 +2332,27 @@ function Globe({
 
       // Lightning strikes — quick bright flashes that fade over ~3 s.
       // Rendered on the overlay (which redraws every frame) so the fade
-      // animation reads correctly. No hit regions — strikes are too
-      // short-lived to click usefully.
+      // animation reads correctly. Hit regions are registered for every
+      // strike still in its TTL window — strikes are short-lived but a
+      // 3 s dwell at a fixed screen position is long enough to hover, and
+      // without a hit region the bolt glyph is visually ambiguous with
+      // generic "yellow dots" on the globe.
       if (layers.lightning && typeof window.getLightningStrikes === 'function') {
         const strikes = window.getLightningStrikes();
-        const now = Date.now();
+        const nowL = Date.now();
         const TTL = 3000;
+        const BOLT_SIZE = 9; // px — readable but doesn't dominate city marks
         for (let i = 0; i < strikes.length; i++) {
           const s = strikes[i];
-          const age = (now - s.t) / TTL;
+          const age = (nowL - s.t) / TTL;
           if (age < 0 || age >= 1) continue;
           if (!visibleOn(projection, s.lon, s.lat)) continue;
           const pt = projection([s.lon, s.lat]);
           if (!pt) continue;
-          // Restored brightness — user reports never seeing a strike,
-          // so dimming was the wrong call. The earlier "constant
-          // strobe" complaint turned out to be the ISS pulse, not
-          // lightning. (See iss-pulse fix in this same PR.)
           const alpha = Math.max(0, 1 - age);
-          octx.fillStyle = `rgba(254, 240, 138, ${(alpha * 0.95).toFixed(3)})`;
-          octx.beginPath();
-          octx.arc(pt[0], pt[1], 1.5, 0, Math.PI * 2);
-          octx.fill();
+          // Expanding halo — the "flash" of the strike. Two concentric
+          // fills: a soft wide ring + a brighter inner ring give the
+          // glow a sense of depth without an actual gradient fill.
           const haloR = 3 + age * 9;
           const haloAlpha = Math.max(0, (1 - age) * 0.55);
           octx.fillStyle = `rgba(254, 240, 138, ${(haloAlpha * 0.4).toFixed(3)})`;
@@ -2345,6 +2363,20 @@ function Globe({
           octx.beginPath();
           octx.arc(pt[0], pt[1], haloR * 0.5, 0, Math.PI * 2);
           octx.fill();
+          // Bolt glyph — stroke-then-fill on a single path so the dark
+          // outline hugs the filled yellow. Gives the strike a legible
+          // "lightning" shape instead of reading as a generic glow dot.
+          iconBolt(octx, pt[0], pt[1], BOLT_SIZE);
+          octx.strokeStyle = `rgba(15, 23, 42, ${(alpha * 0.7).toFixed(3)})`;
+          octx.lineWidth = 0.8;
+          octx.stroke();
+          octx.fillStyle = `rgba(254, 240, 138, ${alpha.toFixed(3)})`;
+          octx.fill();
+          // Hit region. Payload carries `time` (not `t`) so the shared
+          // "X ago" suffix at the bottom of the tooltip resolves; raw
+          // lat/lon are kept for display.
+          pushHit(pt[0], pt[1], Math.max(7, BOLT_SIZE), 'lightning',
+                  { lat: s.lat, lon: s.lon, pol: s.pol || 0, time: s.t });
         }
       }
 
@@ -3001,6 +3033,14 @@ function Globe({
           {hover._layer === 'fire' && (
             <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>
           )}
+          {hover._layer === 'lightning' && (() => {
+            // Blitzortung encodes strike polarity as a signed number:
+            // positive = CG+ (rarer, higher peak current), negative = CG−
+            // (the common cloud-to-ground form), 0 = polarity unresolved.
+            const pol = hover.pol > 0 ? '+CG' : hover.pol < 0 ? '−CG' : 'polarity unknown';
+            const coords = `${hover.lat?.toFixed(2)}, ${hover.lon?.toFixed(2)}`;
+            return <span>Lightning strike · {pol} · {coords}</span>;
+          })()}
           {hover._layer === 'tsunami' && <span>Tsunami · {hover.location || hover.country} {hover.year || ''}</span>}
           {hover._layer === 'city' && <span>{hover.name}{hover.country ? ` · ${hover.country}` : ''}</span>}
           {hover._layer === 'cluster' && <span>{hover.count} {hover.layer}{hover.count>1?'s':''} — click to zoom</span>}
