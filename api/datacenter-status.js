@@ -131,6 +131,96 @@ async function fetchAws() {
 
 // ── Top-level handler ───────────────────────────────────────────────
 
+// Azure status is published as RSS 2.0 only. No JSON endpoint discovered
+// — the official "Azure Service Health" API requires AAD auth. Empty
+// <channel> (no <item>) means no active incidents.
+async function fetchAzure() {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch('https://azurestatuscdn.azureedge.net/en-us/status/feed/', {
+      headers: {
+        'User-Agent': 'gods-eye/1.0 (+https://gods-eye-phi.vercel.app)',
+        'Accept':     'application/rss+xml,text/xml,*/*',
+      },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (!res.ok) return { state: 'unknown', incidents: [] };
+    const xml = await res.text();
+    const stripCdata = (s) => (s || '').replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/, '$1').trim();
+    const decodeEntities = (s) => (s || '')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'");
+    const items = xml.match(/<item\b[\s\S]*?<\/item>/g) || [];
+    const incidents = items.map((blk, i) => {
+      const title   = decodeEntities(stripCdata(/<title>([\s\S]*?)<\/title>/.exec(blk)?.[1] || ''));
+      const pubDate = (/<pubDate>([\s\S]*?)<\/pubDate>/.exec(blk)?.[1] || '').trim();
+      const link    = (/<link>([\s\S]*?)<\/link>/.exec(blk)?.[1] || '').trim();
+      return {
+        id: link || `azure-${pubDate || i}`,
+        title: title || 'Azure event',
+        regions: extractAzureRegions(title),
+        startedAt: pubDate ? new Date(pubDate).toISOString() : null,
+        severity: null,
+      };
+    });
+    return { state: incidents.length ? 'degraded' : 'operational', incidents };
+  } catch (e) {
+    console.warn('[dc-status] azure failed:', e.message);
+    return { state: 'unknown', incidents: [] };
+  }
+}
+function extractAzureRegions(title) {
+  // Azure incident titles typically mention the affected region by name.
+  // Coarse substring match against the core region codes we care about.
+  const map = {
+    'EAST US 2':            'eastus2',
+    'EAST US':              'eastus',
+    'WEST US 3':            'westus3',
+    'WEST US 2':            'westus2',
+    'WEST US':              'westus',
+    'CENTRAL US':           'centralus',
+    'NORTH CENTRAL US':     'northcentralus',
+    'SOUTH CENTRAL US':     'southcentralus',
+    'CANADA CENTRAL':       'canadacentral',
+    'CANADA EAST':          'canadaeast',
+    'BRAZIL SOUTH':         'brazilsouth',
+    'NORTH EUROPE':         'northeurope',
+    'WEST EUROPE':          'westeurope',
+    'UK SOUTH':             'uksouth',
+    'UK WEST':              'ukwest',
+    'FRANCE CENTRAL':       'francecentral',
+    'GERMANY WEST CENTRAL': 'germanywestcentral',
+    'SWITZERLAND NORTH':    'switzerlandnorth',
+    'NORWAY EAST':          'norwayeast',
+    'SWEDEN CENTRAL':       'swedencentral',
+    'ITALY NORTH':          'italynorth',
+    'POLAND CENTRAL':       'polandcentral',
+    'SPAIN CENTRAL':        'spaincentral',
+    'JAPAN EAST':           'japaneast',
+    'JAPAN WEST':           'japanwest',
+    'KOREA CENTRAL':        'koreacentral',
+    'SOUTHEAST ASIA':       'southeastasia',
+    'EAST ASIA':            'eastasia',
+    'AUSTRALIA EAST':       'australiaeast',
+    'AUSTRALIA SOUTHEAST':  'australiasoutheast',
+    'CENTRAL INDIA':        'centralindia',
+    'SOUTH INDIA':          'southindia',
+    'UAE NORTH':            'uaenorth',
+    'QATAR CENTRAL':        'qatarcentral',
+    'ISRAEL CENTRAL':       'israelcentral',
+    'SOUTH AFRICA NORTH':   'southafricanorth',
+  };
+  const u = (title || '').toUpperCase();
+  const hits = [];
+  // Check longest labels first to avoid "EAST US" false-matching "EAST US 2".
+  for (const [label, code] of Object.entries(map).sort((a,b) => b[0].length - a[0].length)) {
+    if (u.includes(label)) hits.push(code);
+  }
+  return Array.from(new Set(hits));
+}
+
 // Oracle's OCI status page doesn't expose summary.json or incidents.json
 // like a standard Statuspage deployment — only the aggregate indicator
 // at /api/v2/status.json. Returns { status: { indicator, description } }
@@ -151,21 +241,29 @@ async function fetchOci() {
 }
 
 async function buildList() {
-  const [gcp, cloudflare, oracle, aws] = await Promise.all([
+  const [gcp, cloudflare, oracle, aws, azure] = await Promise.all([
     fetchGcp(),
     fetchStatuspage('https://www.cloudflarestatus.com/api/v2/summary.json', 'cloudflare'),
     fetchOci(),
     fetchAws(),
+    fetchAzure(),
   ]);
   return {
     generatedAt: Date.now(),
     providers: {
       aws,
+      azure,
       gcp,
       cloudflare,
       oci: oracle,
-      azure:   { state: 'unknown', incidents: [], note: 'Azure status is RSS-only; not yet parsed.' },
-      alibaba: { state: 'unknown', incidents: [], note: 'No public JSON status feed.' },
+      // Alibaba's status console is a client-rendered React app with
+      // bot-walled /api/* endpoints (all 302 to Taobao login for non-
+      // browser User-Agents). Without a server-side JS runtime there's
+      // no way to read their feed from here.
+      alibaba: {
+        state: 'unknown', incidents: [],
+        note: 'Alibaba Cloud has no public JSON/RSS status feed; status.alibabacloud.com is a client-rendered app with bot-walled APIs.',
+      },
     },
   };
 }
