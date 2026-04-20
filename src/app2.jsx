@@ -360,6 +360,38 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <line x1="12" y1="10" x2="12" y2="18"/>
         </svg>
       );
+    case 'dam':
+      // Stylized dam wall — a low horizontal barrier with water
+      // indicated above. Reads as "dam" at 12px in the sub-panel.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 14 L21 10 L21 15 L3 15 Z" fill={color} fillOpacity="0.3"/>
+          <path d="M3 14 L21 10"/>
+          <path d="M5 19 Q7 17, 9 19 T13 19 T17 19 T21 19" opacity="0.6"/>
+        </svg>
+      );
+    case 'port':
+      // Classic anchor — universally recognizable port marker.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="5" r="2"/>
+          <line x1="12" y1="7" x2="12" y2="19"/>
+          <line x1="8" y1="11" x2="16" y2="11"/>
+          <path d="M5 15 A7 7 0 0 0 12 19 A7 7 0 0 0 19 15"/>
+        </svg>
+      );
+    case 'pipeline':
+      // Two segments with a valve-joint in the middle, plus endcaps —
+      // reads as "pipe" rather than generic "line".
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="12" x2="9" y2="12"/>
+          <line x1="15" y1="12" x2="21" y2="12"/>
+          <circle cx="12" cy="12" r="2.5"/>
+          <line x1="3" y1="9" x2="3" y2="15"/>
+          <line x1="21" y1="9" x2="21" y2="15"/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -476,6 +508,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       {[
                         ['refineries', 'Oil refineries',    'refinery',  '#a16207'],
                         ['lng',        'LNG terminals',     'lng',       '#93c5fd'],
+                        ['pipelines',  'Oil / gas pipelines','pipeline', '#d97706'],
                         ['plants',     'Power plants',      'bolt',      '#f59e0b'],
                         ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
                         ['fabs',       'Semiconductor fabs','fab',       '#a78bfa'],
@@ -567,6 +600,36 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                           </div>
                         </div>
                       )}
+                      {/* Divider between Connectivity and Water */}
+                      <div className="border-t border-black/10 dark:border-white/10 my-1"/>
+                      {/* Water group */}
+                      <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!layers.dams}
+                          onChange={e => setLayers(x => ({ ...x, dams: e.target.checked }))}
+                          className="accent-accent-500 scale-90"
+                        />
+                        <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: '#3b82f6' }}>
+                          <GlyphSVG kind="dam" color="#3b82f6" size={12}/>
+                        </span>
+                        <span className="opacity-80">Major dams</span>
+                      </label>
+                      {/* Divider between Water and Transport */}
+                      <div className="border-t border-black/10 dark:border-white/10 my-1"/>
+                      {/* Transport group */}
+                      <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!layers.ports}
+                          onChange={e => setLayers(x => ({ ...x, ports: e.target.checked }))}
+                          className="accent-accent-500 scale-90"
+                        />
+                        <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: '#10b981' }}>
+                          <GlyphSVG kind="port" color="#10b981" size={12}/>
+                        </span>
+                        <span className="opacity-80">Major ports</span>
+                      </label>
                     </div>
                   )}
                   {/* Seismic magnitude floor — only the quake layer gets a
@@ -999,6 +1062,30 @@ function Dossier({ item, onClose }) {
           <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
           <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name + ' LNG')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
         </>}
+        {layer === 'dam' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Dam{item.dam_type ? ` · ${item.dam_type.replace(/_/g, ' ')}` : ''}</div>
+          {item.river && <KV k="River" v={item.river}/>}
+          {item.height_m != null && <KV k="Height" v={`${item.height_m} m`}/>}
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
+        </>}
+        {layer === 'port' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Port{item.cargo_type ? ` · ${item.cargo_type}` : ''}</div>
+          {item.teu_millions != null && <KV k="Throughput" v={`${item.teu_millions} M TEU/yr`}/>}
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name.split(' (')[0] + ' Port')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
+        {layer === 'pipeline' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">{item.type === 'gas' ? 'Gas' : 'Oil'} pipeline{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.length_km != null && <KV k="Length" v={`${Math.round(item.length_km).toLocaleString()} km`}/>}
+          {item.start_country && <KV k="Route" v={`${item.start_country} → ${item.end_country}`}/>}
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name.split(' (')[0])}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
         {layer === 'city' && <>
           <div className="text-lg">{item.name}</div>
           {item.country && <div className="text-sm opacity-70">{item.country}{item.admin1 ? ` · ${item.admin1}` : ''}</div>}
@@ -1421,7 +1508,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, infrastructure:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, dams:false, ports:false, pipelines:false, infrastructure:false };
     // One-shot migration: users who had any infrastructure sub-layer enabled
     // before the parent toggle existed should have the parent auto-enabled
     // on first load of this version. Detect by: `infrastructure` key absent
@@ -1712,6 +1799,9 @@ function App() {
     if (typeof window.fetchFabs === 'function') window.fetchFabs().then(f => { if (alive) setData(d => ({ ...d, fabs: f })); });
     if (typeof window.fetchRefineries === 'function') window.fetchRefineries().then(x => { if (alive) setData(d => ({ ...d, refineries: x })); });
     if (typeof window.fetchLngTerminals === 'function') window.fetchLngTerminals().then(x => { if (alive) setData(d => ({ ...d, lng: x })); });
+    if (typeof window.fetchDams === 'function') window.fetchDams().then(x => { if (alive) setData(d => ({ ...d, dams: x })); });
+    if (typeof window.fetchPortsMajor === 'function') window.fetchPortsMajor().then(x => { if (alive) setData(d => ({ ...d, ports: x })); });
+    if (typeof window.fetchPipelines === 'function') window.fetchPipelines().then(x => { if (alive) setData(d => ({ ...d, pipelines: x })); });
     return () => { alive = false; clearInterval(id); };
   }, []);
 
