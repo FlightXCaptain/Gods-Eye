@@ -1738,21 +1738,31 @@ function Globe({
         // in far enough to warrant 10m, you keep seeing 10m, stable,
         // across pan and further zoom within the same band.
         //
-        // Thresholds (raised from earlier 1.4 / 4 so finer tiers only
-        // kick in when you're actually zoomed in far enough for the
-        // extra detail to *read* on screen — showing 10m at
-        // continent-scale zoom burns bytes without changing what the
-        // user sees):
-        //   • zoomB < 3  →  110m   (~100 KB, ~175 polys)   globe + default
-        //   • zoomB < 8  →  50m    (~550 KB, ~1400 polys)  regional
-        //   • zoomB ≥ 8  →  10m    (~3 MB,  ~4000 polys)   close-in
+        // Thresholds: finer tiers only kick in when you're zoomed in far
+        // enough for the extra detail to *read* on screen AND the render
+        // cost of more polygons is offset by the fact that most of them
+        // have clipped off-screen. At zoomB ≥ 15 the sphere is ~10× the
+        // viewport diagonal, so only ~1% of polygons actually project
+        // inside the visible area — that's when 10m stops costing FPS.
+        //   • zoomB < 3   →  110m   (~100 KB, ~175 polys)    globe view
+        //   • zoomB < 15  →  50m    (~550 KB, ~1400 polys)   regional
+        //   • zoomB ≥ 15  →  10m    (~3 MB,  ~4000 polys,    close-in,
+        //                            but mostly clipped)
+        //
+        // Previous 10m threshold of 8 was still in a range where a big
+        // slice of the sphere was on-screen, so 10m drew ~2000 polys per
+        // frame plus overlays — pushing frames past 16 ms, stalling the
+        // event loop, and letting wheel events queue up. When they drained
+        // in a burst the camera snapped unpredictably ("random spinning")
+        // and further input felt unresponsive. 15 puts the transition
+        // comfortably inside the cheap regime.
         //
         // Tiers fall back gracefully while the higher-res files are
         // still streaming.
         const landTier =
-          zoomB < 3 ? (landLowRef.current  || landMidRef.current  || landHighRef.current) :
-          zoomB < 8 ? (landMidRef.current  || landLowRef.current  || landHighRef.current) :
-                      (landHighRef.current || landMidRef.current  || landLowRef.current);
+          zoomB < 3  ? (landLowRef.current  || landMidRef.current  || landHighRef.current) :
+          zoomB < 15 ? (landMidRef.current  || landLowRef.current  || landHighRef.current) :
+                       (landHighRef.current || landMidRef.current  || landLowRef.current);
         if (landTier) {
           landRef.current = landTier;
           bctx.beginPath(); path(landTier);
