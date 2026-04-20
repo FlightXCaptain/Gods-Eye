@@ -1289,11 +1289,15 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false };
-    // Merge stored preferences on top of defaults. Off-by-default layers
-    // (wind, tsunamis) can be toggled on via the Layers popover and their
-    // choice persists across reloads.
-    const merged = { ...def, ...layers };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, infrastructure:false };
+    // One-shot migration: users who had any infrastructure sub-layer enabled
+    // before the parent toggle existed should have the parent auto-enabled
+    // on first load of this version. Detect by: `infrastructure` key absent
+    // from stored state AND at least one sub-layer true. Idempotent because
+    // next load will have `infrastructure` in stored state.
+    const anyOldInfra = layers.plants || layers.reactors || layers.cables || layers.datacenters;
+    const needsMigration = layers.infrastructure === undefined && anyOldInfra;
+    const merged = { ...def, ...layers, ...(needsMigration ? { infrastructure: true } : {}) };
     if (JSON.stringify(merged) !== JSON.stringify(layers)) setLayers(merged);
     localStorage.setItem('ge-layers', JSON.stringify(merged));
   }, [layers]);
