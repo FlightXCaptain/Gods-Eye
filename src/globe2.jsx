@@ -430,6 +430,14 @@ function Globe({
   const targetRotRef = useRef([0, -15, 0]);
   const targetScaleRef = useRef(scaleRef.current);
   const dirtyBase = useRef(true);
+  // Tracks whether the previous frame was still inside the 200 ms
+  // "recentlyMoved" window. When it transitions true → false the base
+  // canvas needs one more redraw so the land LOD tier can upgrade from
+  // 110m (used during motion) to 50m/10m (used when stationary). Without
+  // this edge-detect the dirty-flag system never fires on motion-stop —
+  // nothing else writes dirtyBase once the scale/rotation lerp converges
+  // — so the higher-res tiers never actually render.
+  const wasRecentlyMovedRef = useRef(false);
   const hoverRef = useRef(null);
   const hoverAppliedRef = useRef(null); // mirrors the last value pushed into React state so the tick-loop compare avoids tearing down the RAF on every mousemove
   const [hover, setHover] = useState(null);
@@ -1281,6 +1289,21 @@ function Globe({
         lastMoveTs = tickNow;
       }
       const recentlyMoved = tickNow - lastMoveTs < 200;
+
+      // Edge-detect motion-stop. The land-tier selector in the base
+      // draw block below picks 110m while recentlyMoved is true and
+      // 50m/10m while false — but the dirty-flag cache is only
+      // invalidated by things that *actively change* (lerp, wheel,
+      // auto-rotate, data arrival). `recentlyMoved` flips from true
+      // to false after a 200 ms timeout with no code path writing
+      // anything, so without this one-shot dirty we'd stay frozen at
+      // whatever tier was drawn during the last motion frame (110m).
+      // Flagging dirty here guarantees the final redraw picks up the
+      // stationary-tier upgrade (50m / 10m).
+      if (wasRecentlyMovedRef.current && !recentlyMoved) {
+        dirtyBase.current = true;
+      }
+      wasRecentlyMovedRef.current = recentlyMoved;
 
       // Auto-rotate runs whenever the prop is true. Interactions flip it
       // off via onInteract (parent owns the flag). Base redraw is throttled
@@ -3296,7 +3319,11 @@ function Globe({
             <span>{hover.name}{hover.type ? ` · ${hover.type}` : ''}{hover.length_km ? ` · ${Math.round(hover.length_km).toLocaleString()} km` : ''}</span>
           )}
           {hover._layer === 'news' && (
-            <span>{hover.place || 'Unlocated'} · {hover.mentions || 1}× mentions · tone {hover.tone?.toFixed?.(1) || 0}</span>
+            <span>
+              {hover.summary || ((hover.place || 'Unlocated') + ' · ' + (hover.eventName || 'Event'))}
+              {' · '}
+              {(hover.mentions || 1)}× mentions · tone {hover.tone?.toFixed?.(1) || '0.0'}
+            </span>
           )}
           {hover._layer === 'fire' && (
             <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>
