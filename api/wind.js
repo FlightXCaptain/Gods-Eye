@@ -23,6 +23,13 @@ let cache = null;
 // faster with each retry.
 let nextRefreshAfter = 0;
 const BACKOFF_MS = 15 * 60 * 1000;
+// Last successfully-populated u/v arrays, kept across refreshes. When a
+// new fetch only partially succeeds (Open-Meteo rate-limits one batch
+// but not others) we use these as the seed so the failed cells keep
+// their last known values rather than blanking — a single failed batch
+// otherwise wipes out a third of the globe's wind for ~10 min.
+let lastGoodU = null;
+let lastGoodV = null;
 
 function buildGridPoints() {
   const pts = [];
@@ -85,8 +92,17 @@ async function buildGrid() {
   // location. Convert "from" direction → (u, v) velocity components so the
   // client can translate a particle's lon/lat each frame without redoing
   // trig per particle per frame.
+  //
+  // Seed with last-known good values so a partial-batch failure leaves
+  // those cells with stale-but-populated wind rather than zeroing them
+  // (which would blank that swath of the globe entirely). Successful
+  // cells overwrite their seeded values below.
   const u = new Float32Array(nLat * nLon);
   const v = new Float32Array(nLat * nLon);
+  if (lastGoodU && lastGoodU.length === nLat * nLon) {
+    u.set(lastGoodU);
+    v.set(lastGoodV);
+  }
   for (let i = 0; i < points.length; i++) {
     const rec = flat[i];
     if (!rec?.current) continue;
@@ -99,6 +115,9 @@ async function buildGrid() {
     u[i] = -speed * Math.sin(dirRad);
     v[i] = -speed * Math.cos(dirRad);
   }
+  // Snapshot the merged grid for next refresh's seed.
+  lastGoodU = new Float32Array(u);
+  lastGoodV = new Float32Array(v);
 
   return {
     generatedAt: Date.now(),
