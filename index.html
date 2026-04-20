@@ -88,6 +88,10 @@ tailwind.config = {
   /* Ticker scroll */
   @keyframes tk { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   .tk-row { animation: tk 90s linear infinite; }
+  /* Pause the scroll when the user is trying to click an entry, otherwise
+     items slide out from under the cursor and lock-on becomes frustrating.
+     Resumes on mouse-leave. */
+  .tk-row:hover { animation-play-state: paused; }
   /* Fade edges for ticker */
   .tk-mask { mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); }
   /* Pulse */
