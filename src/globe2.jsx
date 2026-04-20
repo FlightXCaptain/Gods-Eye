@@ -700,6 +700,14 @@ function Globe({
   //   displayLat/Lon/Hdg       — what we draw this frame
   //   lastTs                   — server's _ts, detects "new update arrived"
   const flightStateRef = useRef(new Map());
+  // Previous frame's flight-cell ownership — cellKey → flight.id.
+  // Powers hysteresis in the spatial-decimation render loop: a flight
+  // that owned a cell last frame keeps it if it's still mapping to
+  // that cell this frame, regardless of the altitude tiebreak. Without
+  // this, a lower-altitude plane gets kicked out of its cell whenever
+  // a higher-altitude neighbour briefly drifts across the grid line
+  // into that cell — the classic "blinks in and out" flicker.
+  const flightCellOwnerRef = useRef(new Map());
   // Ship smoothing state — declared sog (knots) + cog (degrees) feed
   // the eased display, same idea as flights. Keyed by mmsi.
   const shipStateRef   = useRef(new Map());
@@ -3093,7 +3101,6 @@ function Globe({
         // Prefer higher-altitude aircraft per bin. Sorted list is kept in a
         // ref and refreshed only when data.flights changes (see useEffect).
         const sorted = sortedFlightsRef.current.length ? sortedFlightsRef.current : data.flights;
-        const seenFlight = new Set();
         const rendered = [];
         const fState = flightStateRef.current;
         const seenIds = new Set();
@@ -3101,6 +3108,10 @@ function Globe({
         const EASE_HDG = 0.12;
         const DR_MAX_AGE_S = 120;   // stop extrapolating after 2 min stale
 
+        // PASS 1: advance smoothing state for every flight and collect
+        // visible candidates. Each candidate carries its computed cell
+        // key so the claim passes below can do cheap lookups only.
+        const candidates = [];
         for (const f of sorted) {
           seenIds.add(f.id);
 
@@ -3160,18 +3171,42 @@ function Globe({
           while (dh < -180) dh += 360;
           st.displayHdg += dh * EASE_HDG;
 
-          // --- Visibility + spatial decimation use the eased position ---
+          // --- Visibility + project with the eased position ---
           if (!visibleOn(projection, st.displayLon, st.displayLat)) continue;
           const pt = projection([st.displayLon, st.displayLat]); if (!pt) continue;
           const [px, py] = pt;
           const k = (Math.floor(px / flightCell) << 16) | (Math.floor(py / flightCell) & 0xffff);
-          if (seenFlight.has(k)) continue;
-          seenFlight.add(k);
-          // Trail history records the EASED position too — otherwise the
-          // tail and the icon would drift apart as DR predicts forward.
-          pushTrail(flightHistRef.current, f.id, st.displayLon, st.displayLat);
-          rendered.push({ f, px, py, hdg: st.displayHdg });
+          candidates.push({ f, st, px, py, hdg: st.displayHdg, cellKey: k });
         }
+
+        // PASS 2a: incumbents keep their cells. If a flight owned this
+        // cell last frame AND it's still the one mapping to that cell
+        // now, reclaim it before any altitude-sort competition. Stops
+        // a lower-altitude neighbour from being kicked out whenever a
+        // higher-altitude flight briefly drifts across the grid line
+        // into its cell — the "blinks in and out" flicker.
+        const prevCellOwner = flightCellOwnerRef.current;
+        const newCellOwner  = new Map();
+        const claimed       = new Set();   // flight.id → added to `rendered`
+        for (const c of candidates) {
+          if (prevCellOwner.get(c.cellKey) === c.f.id && !newCellOwner.has(c.cellKey)) {
+            newCellOwner.set(c.cellKey, c.f.id);
+            claimed.add(c.f.id);
+            pushTrail(flightHistRef.current, c.f.id, c.st.displayLon, c.st.displayLat);
+            rendered.push({ f: c.f, px: c.px, py: c.py, hdg: c.hdg });
+          }
+        }
+        // PASS 2b: fill still-unclaimed cells in altitude order.
+        // `candidates` preserves the sort from `sorted`, so the first
+        // candidate hitting a free cell wins it.
+        for (const c of candidates) {
+          if (claimed.has(c.f.id)) continue;
+          if (newCellOwner.has(c.cellKey)) continue;
+          newCellOwner.set(c.cellKey, c.f.id);
+          pushTrail(flightHistRef.current, c.f.id, c.st.displayLon, c.st.displayLat);
+          rendered.push({ f: c.f, px: c.px, py: c.py, hdg: c.hdg });
+        }
+        flightCellOwnerRef.current = newCellOwner;
 
         // Prune state for flights that left the snapshot (landed, stale,
         // out of range). Keeps the map bounded without GC pressure.

@@ -96,13 +96,24 @@
       } catch {}
     });
 
-    // Flights — server pushes a fresh full list every ~5 s. Replace the
-    // map in place so dead entries don't accumulate.
+    // Flights — server pushes a fresh full list every ~5 s. We used to
+    // clear the map and rebuild from each snapshot; that meant a
+    // single missed entry (hotspot poll temporarily lost a plane over
+    // a sparse-coverage region) vanished it client-side instantly and
+    // if the user had been looking at that plane the icon just
+    // disappeared. Now we MERGE: incoming entries refresh matching
+    // records and stamp a client-side "last seen" time. Anything not
+    // re-seen inside FLIGHT_RETAIN_MS is purged. One-off ADS-B
+    // coverage gaps don't cascade into UI pop-outs.
+    const FLIGHT_RETAIN_MS = 3 * 60 * 1000;
     es.addEventListener('flight:s', (ev) => {
       try {
         const list = JSON.parse(ev.data);
-        FLIGHTS.clear();
-        for (const f of list) FLIGHTS.set(f.id, f);
+        const now = Date.now();
+        for (const f of list) FLIGHTS.set(f.id, { ...f, _rxSeen: now });
+        for (const [id, f] of FLIGHTS) {
+          if (!f._rxSeen || (now - f._rxSeen) > FLIGHT_RETAIN_MS) FLIGHTS.delete(id);
+        }
         broadcastFlights();
       } catch (e) { console.warn('[stream] flight snapshot parse', e); }
     });
