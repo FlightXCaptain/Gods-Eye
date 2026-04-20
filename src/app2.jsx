@@ -441,6 +441,110 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       </span>
                     )}
                   </label>
+                  {/* Critical Infrastructure sub-panel. Rendered only when
+                      the chevron has been expanded, regardless of whether
+                      the parent checkbox is on (so users can inspect
+                      sub-options pre-enable). Visual groups separated by
+                      thin dividers; no group headers. When the Data centers
+                      sub-layer is enabled, its operator filter grid nests
+                      below it — preserved verbatim from the pre-refactor
+                      datacenters sub-filter UI. */}
+                  {k === 'infrastructure' && infraExpanded && (
+                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
+                      {/* Energy group */}
+                      {[
+                        ['plants',     'Power plants',      'bolt',      '#f59e0b'],
+                        ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
+                      ].map(([sk, slabel, sglyph, scol]) => (
+                        <label key={sk} className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!layers[sk]}
+                            onChange={e => setLayers(x => ({ ...x, [sk]: e.target.checked }))}
+                            className="accent-accent-500 scale-90"
+                          />
+                          <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: scol }}>
+                            <GlyphSVG kind={sglyph} color={scol} size={12}/>
+                          </span>
+                          <span className="opacity-80">{slabel}</span>
+                        </label>
+                      ))}
+                      {/* Divider between Energy and Connectivity */}
+                      <div className="border-t border-black/10 dark:border-white/10 my-1"/>
+                      {/* Connectivity group */}
+                      <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!layers.cables}
+                          onChange={e => setLayers(x => ({ ...x, cables: e.target.checked }))}
+                          className="accent-accent-500 scale-90"
+                        />
+                        <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: '#22d3ee' }}>
+                          <GlyphSVG kind="aurora" color="#22d3ee" size={12}/>
+                        </span>
+                        <span className="opacity-80">Submarine cables</span>
+                      </label>
+                      <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!layers.datacenters}
+                          onChange={e => setLayers(x => ({ ...x, datacenters: e.target.checked }))}
+                          className="accent-accent-500 scale-90"
+                        />
+                        <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: '#5eead4' }}>
+                          <GlyphSVG kind="sat" color="#5eead4" size={12}/>
+                        </span>
+                        <span className="opacity-80">Data centers</span>
+                      </label>
+                      {/* Datacenter operator sub-filter — nested below the
+                          Data centers sub-row when enabled. 6 hyperscalers +
+                          top 6 colo operators + Other bucket, preserved
+                          verbatim from pre-refactor behavior. */}
+                      {layers.datacenters && dcFilters && (
+                        <div className="pl-6 pr-0 pb-1 pt-0.5 space-y-1">
+                          <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Hyperscalers</div>
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                            {[
+                              ['aws',        'AWS',        '#ff9900'],
+                              ['azure',      'Azure',      '#0078d4'],
+                              ['gcp',        'GCP',        '#4285f4'],
+                              ['oci',        'Oracle',     '#c74634'],
+                              ['alibaba',    'Alibaba',    '#ff6a00'],
+                              ['cloudflare', 'Cloudflare', '#f48120'],
+                            ].map(([dk, dlabel, dcol]) => (
+                              <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                                <input type="checkbox" checked={dcFilters[dk] !== false}
+                                       onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
+                                       className="accent-accent-500 scale-90"/>
+                                <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: dcol }}/>
+                                <span className="opacity-80 truncate">{dlabel}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider pt-1">Colo operators (PeeringDB)</div>
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                            {[
+                              ['Equinix',        'Equinix'],
+                              ['Digital Realty', 'Digital Realty'],
+                              ['NTT',            'NTT'],
+                              ['CoreSite',       'CoreSite'],
+                              ['Telehouse',      'Telehouse'],
+                              ['Cologix',        'Cologix'],
+                              ['Other',          'Other colos'],
+                            ].map(([dk, dlabel]) => (
+                              <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                                <input type="checkbox" checked={dcFilters[dk] !== false}
+                                       onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
+                                       className="accent-accent-500 scale-90"/>
+                                <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#5eead4' }}/>
+                                <span className="opacity-80 truncate">{dlabel}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {/* Seismic magnitude floor — only the quake layer gets a
                       secondary control. Placed directly below the toggle so
                       the visual grouping ("this modifies THAT") is obvious. */}
@@ -496,52 +600,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                           <span className="opacity-80 truncate">{slabel}</span>
                         </label>
                       ))}
-                    </div>
-                  )}
-                  {/* Datacenter operator sub-filter — 6 hyperscalers +
-                      top 6 colo operators + Other bucket. Grouped in
-                      two labelled sections because the mix is long. */}
-                  {k === 'datacenters' && layers.datacenters && dcFilters && (
-                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-1">
-                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Hyperscalers</div>
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-                        {[
-                          ['aws',        'AWS',        '#ff9900'],
-                          ['azure',      'Azure',      '#0078d4'],
-                          ['gcp',        'GCP',        '#4285f4'],
-                          ['oci',        'Oracle',     '#c74634'],
-                          ['alibaba',    'Alibaba',    '#ff6a00'],
-                          ['cloudflare', 'Cloudflare', '#f48120'],
-                        ].map(([dk, dlabel, dcol]) => (
-                          <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
-                            <input type="checkbox" checked={dcFilters[dk] !== false}
-                                   onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
-                                   className="accent-accent-500 scale-90"/>
-                            <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: dcol }}/>
-                            <span className="opacity-80 truncate">{dlabel}</span>
-                          </label>
-                        ))}
-                      </div>
-                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider pt-1">Colo operators (PeeringDB)</div>
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-                        {[
-                          ['Equinix',        'Equinix'],
-                          ['Digital Realty', 'Digital Realty'],
-                          ['NTT',            'NTT'],
-                          ['CoreSite',       'CoreSite'],
-                          ['Telehouse',      'Telehouse'],
-                          ['Cologix',        'Cologix'],
-                          ['Other',          'Other colos'],
-                        ].map(([dk, dlabel]) => (
-                          <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
-                            <input type="checkbox" checked={dcFilters[dk] !== false}
-                                   onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
-                                   className="accent-accent-500 scale-90"/>
-                            <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#5eead4' }}/>
-                            <span className="opacity-80 truncate">{dlabel}</span>
-                          </label>
-                        ))}
-                      </div>
                     </div>
                   )}
                   {k === 'news' && layers.news && (
