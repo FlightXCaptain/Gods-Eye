@@ -11,6 +11,8 @@
 // Real cost is the one-time parse on cold boot (~400 ms). Every subsequent
 // request is an in-memory array serialization.
 
+import { parseCsvLine } from './_csv.js';
+
 export const config = { runtime: 'nodejs', maxDuration: 30 };
 
 const SOURCE_URL = 'https://raw.githubusercontent.com/wri/global-power-plant-database/master/output_database/global_power_plant_database.csv';
@@ -19,30 +21,6 @@ const MIN_MW = 100;
 let cached = null;
 let cachedAt = 0;
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 h — upstream only changes on version bumps
-
-// Minimal RFC-4180 CSV parser: handles quoted fields, escaped quotes ("")
-// inside quoted fields, and embedded commas/newlines. WRI's CSV has a handful
-// of plant names with commas inside quotes, so we can't just split.
-function parseCsvLine(line) {
-  const out = [];
-  let cur = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; }
-        else inQuotes = false;
-      } else cur += ch;
-    } else {
-      if (ch === ',') { out.push(cur); cur = ''; }
-      else if (ch === '"' && cur === '') inQuotes = true;
-      else cur += ch;
-    }
-  }
-  out.push(cur);
-  return out;
-}
 
 async function loadFleet() {
   const res = await fetch(SOURCE_URL);
