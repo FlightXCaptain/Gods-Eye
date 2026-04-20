@@ -143,5 +143,27 @@ tailwind.config = {
 <script type="text/babel" src="src/pipelines.jsx"></script>
 <script type="text/babel" src="src/app2.jsx"></script>
 
+<!--
+  Vercel Analytics — page-view + custom-event telemetry for this app.
+  This is the vanilla / script-tag integration (the one documented for
+  projects that don't use a Vercel-adapted framework). We're not on
+  Next.js, so the `@vercel/analytics/next` React wrapper doesn't apply;
+  the snippet below is the equivalent and routes to the same dashboard.
+
+  The first <script> sets up a tiny queue shim so any `window.va(...)`
+  calls that fire before the real script loads are captured and
+  flushed once it arrives. The second pulls the Analytics runtime
+  from Vercel's edge at /_vercel/insights/script.js — served
+  automatically when Analytics is enabled in the Vercel project.
+
+  To disable: flip Analytics off in Vercel dashboard (no code change
+  needed — the /_vercel/insights/script.js endpoint stops responding,
+  the defer script is a harmless 404).
+-->
+<script>
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+</script>
+<script defer src="/_vercel/insights/script.js"></script>
+
 </body>
 </html>
