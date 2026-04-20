@@ -2103,7 +2103,11 @@ function App() {
       type: layer,
       label: labelFor(hit, layer),
       coords: [hit.lon, hit.lat],
-      zoom: lockZoom(layer),
+      // No `zoom` field here on purpose — a map double-click focuses
+      // and tracks without forcibly zooming the camera in. Search
+      // picks still auto-zoom (they set `zoom` via lockZoom). This
+      // matches the asked-for UX: click-on-map = begin tracking at
+      // current zoom; search-pick = tracking + zoom-to-preset.
       trackId: trackKey,
       trackLayer: layer,
       // Carry the callsign along for the route-line lookup in globe2's
@@ -2503,7 +2507,13 @@ function App() {
   const targets = useMemo(() => {
     const out = [];
     if (data.iss) out.push({ type:'iss', label:'ISS · ZARYA', coords:[data.iss.lon, data.iss.lat], sub: `${data.iss.alt?.toFixed(0)} km`, zoom: lockZoom('iss') });
-    for (const f of (data.flights||[]).slice(0, 200)) {
+    // All airborne flights are searchable. Previously capped at 200, which
+    // meant most aircraft couldn't be located by callsign — there are
+    // usually ~3–4k in the air at any time. The SearchBar filter is a
+    // substring match over a flat array, well under a millisecond even
+    // with 5 k entries, so the cap is unnecessary.
+    for (const f of (data.flights || [])) {
+      if (!f.callsign && !f.reg) continue;
       out.push({ type:'flight', label: f.callsign || f.reg, coords:[f.lon,f.lat], sub:`${f.desc||f.type||''}`, zoom: lockZoom('flight') });
     }
     // Satellites — CelesTrak propagated positions. Name is the discriminator
