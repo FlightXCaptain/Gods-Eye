@@ -843,6 +843,24 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
   );
 }
 
+// Lock-on zoom presets per layer. Used by both the double-click focus
+// handler (handleFocusItem) and search-select (targets), so the same
+// mental model applies to every lock-on entry point. Tracked targets
+// (flights/ships/sats/ISS) can safely go high because the camera stays
+// centred on them; static POIs pull close for readability. Country stays
+// conservative because it clips if over-zoomed.
+const LOCK_ON_ZOOM = {
+  iss: 8, sat: 8, country: 4,
+  event: 10, lake: 8, quake: 12,
+  city: 14, flight: 26, ship: 30,
+  // Static infrastructure / conflict news — all city-level point
+  // features with ~city precision so zoom 10 gives a useful close-up.
+  news: 10, cyclone: 4, reactor: 10, plant: 10, datacenter: 10,
+  fab: 10, refinery: 10, lng: 10, gasproc: 10, smelter: 10,
+  mine: 10, cement: 10, dam: 10, port: 10,
+};
+const lockZoom = (type) => LOCK_ON_ZOOM[type] || 8;
+
 // CAMEO root-code metadata used by both the legend accent colour and the
 // category filter inside NewsPopover. Kept here (not inside the popover)
 // because the map's News layer also speaks CAMEO — having one source of
@@ -1964,11 +1982,6 @@ function App() {
   // wider than a tight zoom frame and would clip.
   const handleFocusItem = useCallback((hit) => {
     const layer = hit._layer;
-    const zoomByLayer = {
-      iss: 8, sat: 8, country: 4,
-      event: 10, lake: 8, quake: 12,
-      city: 14, flight: 26, ship: 30,
-    };
     const labelFor = (it, l) => {
       switch (l) {
         case 'iss':     return it.name || 'ISS · ZARYA';
@@ -1982,10 +1995,22 @@ function App() {
         case 'event':   return it.title || 'Event';
         case 'cyclone': return (it.classification ? `${it.classification} ` : '') + (it.name || 'Cyclone');
         case 'outage':  return (it.locations?.[0]?.name || 'Internet outage') + (it.ongoing ? ' · ongoing' : '');
-        case 'reactor': return it.name || 'Reactor';
-        case 'plant':   return it.name || 'Power plant';
-        case 'news':    return it.summary || ((it.place || 'News') + (it.tone ? ` · tone ${it.tone.toFixed(1)}` : ''));
-        default:        return 'Target';
+        case 'reactor':    return it.name || 'Reactor';
+        case 'plant':      return it.name || 'Power plant';
+        case 'datacenter': return it.name || 'Data centre';
+        case 'fab':        return (it.operator ? `${it.operator} · ` : '') + (it.name || 'Fab');
+        case 'refinery':   return it.name || 'Refinery';
+        case 'lng':        return it.name || 'LNG terminal';
+        case 'gasproc':    return it.name || 'Gas processing';
+        case 'smelter':    return it.name || 'Smelter';
+        case 'mine':       return it.name || 'Mine';
+        case 'cement':     return it.name || 'Cement plant';
+        case 'dam':        return it.name || 'Dam';
+        case 'port':       return it.name || 'Port';
+        case 'news':       return it.summary || ((it.place || 'News') + (it.tone ? ` · tone ${it.tone.toFixed(1)}` : ''));
+        // Any layer not enumerated above (future additions) still gets a
+        // useful label from whatever `.name` it carries.
+        default:           return it.name || 'Target';
       }
     };
     const trackKey = layer === 'flight' ? hit.id
@@ -1997,7 +2022,7 @@ function App() {
       type: layer,
       label: labelFor(hit, layer),
       coords: [hit.lon, hit.lat],
-      zoom: zoomByLayer[layer] || 2.5,
+      zoom: lockZoom(layer),
       trackId: trackKey,
       trackLayer: layer,
     });
@@ -2062,7 +2087,7 @@ function App() {
       type: 'news',
       label: n.summary || n.place || 'News event',
       coords: [n.lon, n.lat],
-      zoom: 10,
+      zoom: lockZoom('news'),
     });
     setPicked({ ...n, _layer: 'news' });
   }, []);
@@ -2269,29 +2294,90 @@ function App() {
   // jump to. Lists are capped so the search fuzzy-filter stays snappy.
   const targets = useMemo(() => {
     const out = [];
-    if (data.iss) out.push({ type:'iss', label:'ISS · ZARYA', coords:[data.iss.lon, data.iss.lat], sub: `${data.iss.alt?.toFixed(0)} km`, zoom: 1.8 });
+    if (data.iss) out.push({ type:'iss', label:'ISS · ZARYA', coords:[data.iss.lon, data.iss.lat], sub: `${data.iss.alt?.toFixed(0)} km`, zoom: lockZoom('iss') });
     for (const f of (data.flights||[]).slice(0, 200)) {
-      out.push({ type:'flight', label: f.callsign || f.reg, coords:[f.lon,f.lat], sub:`${f.desc||f.type||''}`, zoom: 2.2 });
+      out.push({ type:'flight', label: f.callsign || f.reg, coords:[f.lon,f.lat], sub:`${f.desc||f.type||''}`, zoom: lockZoom('flight') });
     }
     // Satellites — CelesTrak propagated positions. Name is the discriminator
     // (Starlink-1234, GPS BIIR-5, IRIDIUM 33 etc). Cap at 300 since there can
     // be ~5000 in the dataset and the filter loop is O(n).
     for (const s of (data.sats||[]).slice(0, 300)) {
       if (!s.name) continue;
-      out.push({ type:'sat', label: s.name, coords:[s.lon, s.lat], sub: `${s.group || 'Satellite'} · ${Math.round(s.alt)} km`, zoom: 2.0 });
+      out.push({ type:'sat', label: s.name, coords:[s.lon, s.lat], sub: `${s.group || 'Satellite'} · ${Math.round(s.alt)} km`, zoom: lockZoom('sat') });
     }
     // Named ships from the AIS stream. MMSI-only vessels are skipped — they'd
     // all search as "MMSI 123…" and swamp the list.
     for (const v of (data.ships||[]).slice(0, 200)) {
       if (!v.name) continue;
-      out.push({ type:'ship', label: v.name, coords:[v.lon, v.lat], sub: `${v.category || 'vessel'} · MMSI ${v.mmsi}`, zoom: 2.4 });
+      out.push({ type:'ship', label: v.name, coords:[v.lon, v.lat], sub: `${v.category || 'vessel'} · MMSI ${v.mmsi}`, zoom: lockZoom('ship') });
     }
     for (const q of (data.quakes||[]).slice(0, 40)) {
-      out.push({ type:'quake', label:`M${q.mag?.toFixed(1)} · ${q.place}`, coords:[q.lon,q.lat], sub:fmtAgo(q.time)+' ago', zoom: 2.4 });
+      out.push({ type:'quake', label:`M${q.mag?.toFixed(1)} · ${q.place}`, coords:[q.lon,q.lat], sub:fmtAgo(q.time)+' ago', zoom: lockZoom('quake') });
     }
     for (const e of (data.events||[]).slice(0, 40)) {
-      out.push({ type:'event', label: e.title, coords:[e.lon,e.lat], sub: e.category, zoom: 2.0 });
+      out.push({ type:'event', label: e.title, coords:[e.lon,e.lat], sub: e.category, zoom: lockZoom('event') });
     }
+
+    // News (conflict only). Top-by-mentions so the most-covered incidents
+    // surface first in the search list. 60 is enough headroom that fuzzy
+    // substring matches on place names like "Kyiv" or "Gaza" still hit,
+    // without blowing up the filter array.
+    const newsItems = (data.news || []).filter(n =>
+      typeof n.conflict === 'boolean' ? n.conflict : (n.rootCode >= 14 && n.rootCode <= 20)
+    );
+    newsItems.sort((a, b) => (b.mentions || 0) - (a.mentions || 0));
+    for (const n of newsItems.slice(0, 60)) {
+      if (!isFinite(n.lon) || !isFinite(n.lat)) continue;
+      const root = newsRootName(n);
+      out.push({
+        type: 'news',
+        label: n.summary || `${root} · ${n.place || 'Unknown'}`,
+        coords: [n.lon, n.lat],
+        sub: `${root} · ${n.mentions || 1}× mentions`,
+        zoom: lockZoom('news'),
+      });
+    }
+
+    // Active tropical cyclones — typically fewer than 20 at any time, so
+    // no explicit cap. Label includes classification ("Hurricane Maria")
+    // because searches like "hurricane" should match.
+    for (const c of (data.cyclones || [])) {
+      if (!c?.name || !isFinite(c.lon) || !isFinite(c.lat)) continue;
+      out.push({
+        type: 'cyclone',
+        label: (c.classification ? `${c.classification} ` : '') + c.name,
+        coords: [c.lon, c.lat],
+        sub: c.intensityKt ? `${Math.round(c.intensityKt)} kt` : 'tropical cyclone',
+        zoom: lockZoom('cyclone'),
+      });
+    }
+
+    // Critical infrastructure — every point-feature layer loaded via the
+    // optional window.fetch* hooks. Each is capped so the fuzzy-filter
+    // loop over `targets` stays bounded even with every layer loaded.
+    // Labels are `name` because SearchBar matches only against label
+    // (not sub/type), so that's the field users will actually type.
+    const pushInfra = (arr, type, subFn, limit = 100) => {
+      if (!Array.isArray(arr)) return;
+      const zoom = lockZoom(type);
+      for (const x of arr.slice(0, limit)) {
+        if (!x?.name || !isFinite(x.lon) || !isFinite(x.lat)) continue;
+        out.push({ type, label: x.name, coords: [x.lon, x.lat], sub: subFn(x), zoom });
+      }
+    };
+    pushInfra(data.reactors,    'reactor',    x => [x.country, x.status].filter(Boolean).join(' · ') || 'nuclear reactor', 120);
+    pushInfra(data.plants,      'plant',      x => [x.country, x.fuel, x.capacity ? `${Math.round(x.capacity)} MW` : null].filter(Boolean).join(' · ') || 'power plant', 120);
+    pushInfra(data.datacenters, 'datacenter', x => [x.operator?.toUpperCase?.(), x.city, x.country].filter(Boolean).join(' · ') || 'data centre', 120);
+    pushInfra(data.fabs,        'fab',        x => [x.operator, x.node_nm ? `${x.node_nm} nm` : null].filter(Boolean).join(' · ') || 'semiconductor fab', 60);
+    pushInfra(data.refineries,  'refinery',   x => [x.operator, x.capacity_bpd ? `${Math.round(x.capacity_bpd).toLocaleString()} bpd` : null].filter(Boolean).join(' · ') || 'refinery', 100);
+    pushInfra(data.lng,         'lng',        x => [x.type, x.capacity_mtpa ? `${x.capacity_mtpa} mtpa` : null].filter(Boolean).join(' · ') || 'LNG terminal', 80);
+    pushInfra(data.gasproc,     'gasproc',    x => [x.operator, x.country].filter(Boolean).join(' · ') || 'gas processing', 80);
+    pushInfra(data.smelters,    'smelter',    x => [x.kind, x.operator].filter(Boolean).join(' · ') || 'smelter', 80);
+    pushInfra(data.mines,       'mine',       x => [x.resource, x.operator].filter(Boolean).join(' · ') || 'mine', 100);
+    pushInfra(data.cement,      'cement',     x => [x.operator, x.country].filter(Boolean).join(' · ') || 'cement plant', 80);
+    pushInfra(data.dams,        'dam',        x => [x.dam_type?.replace?.(/_/g, ' '), x.height_m ? `${x.height_m} m` : null].filter(Boolean).join(' · ') || 'dam', 80);
+    pushInfra(data.ports,       'port',       x => [x.cargo_type, x.teu_millions ? `${x.teu_millions}M TEU` : null].filter(Boolean).join(' · ') || 'port', 80);
+
     // Well-known cities
     const cities = [
       ['London',-0.12,51.5],['New York',-74,40.7],['Tokyo',139.7,35.68],['Singapore',103.8,1.35],
@@ -2299,7 +2385,7 @@ function App() {
       ['Mumbai',72.87,19.07],['Paris',2.35,48.86],['Moscow',37.6,55.75],['Beijing',116.4,39.9],
       ['Lagos',3.38,6.52],['Cairo',31.24,30.04],['Mexico City',-99.13,19.43],
     ];
-    for (const [n,lo,la] of cities) out.push({ type:'city', label:n, coords:[lo,la], zoom: 2.0 });
+    for (const [n,lo,la] of cities) out.push({ type:'city', label:n, coords:[lo,la], zoom: lockZoom('city') });
     return out;
   }, [data]);
 
@@ -2530,7 +2616,7 @@ function App() {
           paused={feedPaused}
           onTogglePause={()=>setFeedPaused(p=>!p)}
           onPick={(entry) => {
-            if (entry.coords) setFocusTarget({ type: entry.layer, label: entry.title, coords: entry.coords, zoom: 2.2 });
+            if (entry.coords) setFocusTarget({ type: entry.layer, label: entry.title, coords: entry.coords, zoom: lockZoom(entry.layer) });
             if (entry._item) setPicked(entry._item);
           }}
         />
