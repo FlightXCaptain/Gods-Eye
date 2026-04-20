@@ -198,7 +198,9 @@ async function fetchEONET() {
 //      no-storms-active case makes exactly ONE request (CurrentStorms.json)
 //      and finds no work to do.
 async function fetchNHC() {
-  const c = await safeFetch('https://www.nhc.noaa.gov/CurrentStorms.json');
+  // Through our /api/nhc-storms proxy because NHC's CurrentStorms.json
+  // doesn't send CORS headers.
+  const c = await safeFetch('/api/nhc-storms');
   const active = Array.isArray(c?.activeStorms) ? c.activeStorms : [];
   if (!active.length) return [];
 

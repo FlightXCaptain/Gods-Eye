@@ -92,7 +92,15 @@
       if (!text) return;
       let j;
       try {
-        j = (text[0] === '{' || text[0] === '[') ? JSON.parse(text) : JSON.parse(decode(text));
+        // Always decode. Blitzortung's LZW output preserves the first
+        // character of the original payload, so it always starts with
+        // '{' — meaning the old "is it plain JSON?" heuristic was a
+        // false positive that left the high-codepoint dictionary refs
+        // (Ć, Ċ, ė ...) embedded in what JSON.parse thought was JSON.
+        // The decoder is safe on plain ASCII too: every char < 256 is
+        // treated as a literal, so a plain-JSON input round-trips
+        // unchanged. No heuristic needed.
+        j = JSON.parse(decode(text));
       } catch (err) {
         if (msgsSinceLog <= 2) console.warn('[lightning] parse fail, first bytes:', String(text).slice(0, 60));
         return;
