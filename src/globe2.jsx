@@ -3201,7 +3201,11 @@ function Globe({
             <span>{hover.name}{hover.type ? ` · ${hover.type}` : ''}{hover.capacity_mtpa ? ` · ${hover.capacity_mtpa} mtpa` : ''}</span>
           )}
           {hover._layer === 'news' && (
-            <span>{hover.place || 'Unlocated'} · {hover.mentions || 1}× mentions · tone {hover.tone?.toFixed?.(1) || 0}</span>
+            <span>
+              {hover.summary || ((hover.place || 'Unlocated') + ' · ' + (hover.eventName || 'Event'))}
+              {' · '}
+              {(hover.mentions || 1)}× mentions · tone {hover.tone?.toFixed?.(1) || '0.0'}
+            </span>
           )}
           {hover._layer === 'fire' && (
             <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>
