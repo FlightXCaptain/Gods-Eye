@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60" role="img" aria-label="God's Eye">
+  <g fill="none" stroke="#f43f5e" stroke-width="6" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Almond eye outline -->
+    <path d="M 10 30 Q 60 -2 110 30 Q 60 62 10 30 Z"/>
+    <!-- Iris -->
+    <circle cx="60" cy="30" r="15"/>
+  </g>
+  <!-- Pupil -->
+  <circle cx="60" cy="30" r="8.5" fill="#f43f5e"/>
+</svg>
