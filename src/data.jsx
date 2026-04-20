@@ -301,17 +301,62 @@ async function fetchPowerPlants() {
 // Goes through /api/gdelt proxy: GDELT rate-limits direct requests and
 // the raw feed is tab-separated-CSV-inside-a-zip, neither of which the
 // browser can handle cleanly.
+//
+// Client-side enrichment: the proxy ships the raw structured fields, and
+// we derive a few helpers here so the UI can speak CAMEO without each
+// component learning the taxonomy:
+//   - `conflict`   — true if CAMEO root code ∈ {14..20} (protest through
+//     mass violence). Drives the Conflict / Non-conflict sub-toggle.
+//   - `rootName`   — human-readable name of the root code ("Fight", etc.).
+//   - `sourceDomain` — stripped from the article URL for compact display.
+//   - `summary`    — short hover/dossier headline like
+//     "Assault · Kyiv, Ukraine" that's self-contained without extra chrome.
+const CAMEO_ROOT_NAMES = {
+  1:'Public statement',  2:'Appeal',             3:'Intent to cooperate',
+  4:'Consult',           5:'Diplomatic coop',    6:'Material cooperation',
+  7:'Provide aid',       8:'Yield',              9:'Investigate',
+  10:'Demand',           11:'Disapprove',        12:'Reject',
+  13:'Threaten',         14:'Protest',           15:'Force posture',
+  16:'Reduce relations', 17:'Coerce',            18:'Assault',
+  19:'Fight',            20:'Mass violence',
+};
+
+function newsSummary(e) {
+  const root = CAMEO_ROOT_NAMES[e.rootCode] || 'Event';
+  // Tidy: drop "(general)" and collapse middle admin divisions so "Kyiv,
+  // Kyyiv, Misto, Ukraine" becomes "Kyiv, Ukraine" on the hover label.
+  const cleaned = (e.place || '').replace(/\s*\(general\)/ig, '').trim();
+  const parts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 2 && parts[0] === parts[parts.length - 1]) parts.pop();
+  const place = parts.length > 2 ? `${parts[0]}, ${parts[parts.length - 1]}` : parts.join(', ');
+  return place ? `${root} · ${place}` : root;
+}
+
+function newsDomain(url) {
+  if (!url) return '';
+  const m = String(url).match(/^https?:\/\/([^\/?#]+)/i);
+  return m ? m[1].replace(/^www\./, '') : '';
+}
+
 async function fetchNewsHotspots() {
   const j = await safeFetch('/api/gdelt');
   if (!Array.isArray(j)) return [];
-  return j.map(e => ({
-    ...e,
-    kind: 'news',
-    // Unify time field with other feeds (numeric ms).
-    time: e.dateAdded ? Date.parse(
-      e.dateAdded.replace(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3T$4:$5:$6Z')
-    ) : Date.now(),
-  }));
+  return j.map(e => {
+    const rootName = CAMEO_ROOT_NAMES[e.rootCode] || 'Other';
+    return {
+      ...e,
+      kind: 'news',
+      // Unify time field with other feeds (numeric ms).
+      time: e.dateAdded ? Date.parse(
+        e.dateAdded.replace(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3T$4:$5:$6Z')
+      ) : Date.now(),
+      conflict:    e.rootCode >= 14 && e.rootCode <= 20,
+      rootName,
+      eventName:   e.eventName || rootName,
+      sourceDomain: e.sourceDomain || newsDomain(e.url),
+      summary:     e.summary || newsSummary(e),
+    };
+  });
 }
 
 async function fetchKp() {

@@ -411,7 +411,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['outages','Internet outages', 'bolt', '#ef4444'],
     ['events','Natural events', 'fire', '#ef4444'],
     ['infrastructure','Critical Infrastructure', 'infra', '#94a3b8'],
-    ['news','News hotspots', 'wiki', '#ef4444'],
+    ['news','News', 'wiki', '#ef4444'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
@@ -691,15 +691,21 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                   )}
                   {k === 'news' && layers.news && (
                     <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
-                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Theme (CAMEO)</div>
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      {/* Conflict vs non-conflict — CAMEO root codes 14–20
+                          are "conflict" (protest, force posture, coerce,
+                          assault, fight, mass violence). Everything else
+                          is "non-conflict" (statements, consultations,
+                          cooperation, aid, demands, disapproval, threats).
+                          Default: conflict on, non-conflict off — so the
+                          layer shows meaningful incidents out of the box
+                          without drowning them in routine coverage. */}
+                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Categories</div>
+                      <div className="grid grid-cols-1 gap-y-0.5">
                         {[
-                          ['quadCoop',     'Verbal coop',  '#22c55e'],
-                          ['quadMat',      'Material coop','#0ea5e9'],
-                          ['quadVerbal',   'Verbal conflict','#f59e0b'],
-                          ['quadConflict', 'Mat. conflict','#ef4444'],
-                        ].map(([nk, nlabel, ncol]) => (
-                          <label key={nk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                          ['conflict',    'Conflict',     '#ef4444', 'Protest, force, coerce, assault, fight, mass violence'],
+                          ['nonConflict', 'Non-conflict', '#64748b', 'Statements, cooperation, aid, demands, threats'],
+                        ].map(([nk, nlabel, ncol, ntitle]) => (
+                          <label key={nk} title={ntitle} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
                             <input type="checkbox" checked={newsFilters[nk] !== false}
                                    onChange={e => setNewsFilters(x => ({ ...x, [nk]: e.target.checked }))}
                                    className="accent-accent-500 scale-90"/>
@@ -810,7 +816,7 @@ function StatBar({ data, kp, layers }) {
     { label: 'Internet outages', short: 'Outages', shortMobile: 'OUT', val: outageCount, glyph: 'bolt',  color: '#ef4444', title: 'Currently-ongoing internet outages worldwide (Cloudflare Radar)' }
   );
   if (layers?.news && newsCount > 0) items.push(
-    { label: 'News hotspots', short: 'News', shortMobile: 'NWS', val: newsCount.toLocaleString(), glyph: 'wiki', color: '#a78bfa', title: 'Geocoded events in the latest GDELT 15-minute window' }
+    { label: 'News', short: 'News', shortMobile: 'NWS', val: newsCount.toLocaleString(), glyph: 'wiki', color: '#a78bfa', title: 'Geocoded news events from the last 8 hours (GDELT 2.0, 15-min cadence)' }
   );
   if (layers?.reactors && reactorCount > 0) items.push(
     { label: 'Reactors',  short: 'Reactors', shortMobile: 'NUC', val: reactorCount, glyph: 'radiation', color: '#22c55e', title: 'Operational nuclear reactors (GeoNuclearData)' }
@@ -947,17 +953,33 @@ function Dossier({ item, onClose }) {
           {item.link && <a href={item.link} target="_blank" className="text-xs text-accent-500 underline">NASA EONET →</a>}
         </>}
         {layer === 'news' && <>
-          <div className="text-lg">{item.place || 'News hotspot'}</div>
-          <div className="text-sm opacity-70">GDELT 2.0 · {item.country || ''}</div>
-          {(() => {
-            const quadLabels = { 1: 'Verbal cooperation', 2: 'Material cooperation', 3: 'Verbal conflict', 4: 'Material conflict' };
-            return item.quad ? <KV k="Theme" v={quadLabels[item.quad] || 'Unknown'}/> : null;
-          })()}
+          {/* Headline: the server-built summary is the richest single
+              line — "Actor1 → Actor2 · Event · Place". Fall back to the
+              place if for some reason summary is missing. */}
+          <div className="text-lg leading-tight">{item.summary || item.place || 'News event'}</div>
+          <div className="text-sm opacity-70">
+            {item.conflict ? 'Conflict' : 'Non-conflict'}
+            {item.eventName ? ` · ${item.eventName}` : ''}
+            {item.country ? ` · ${item.country}` : ''}
+          </div>
+          {item.place && item.summary && item.summary.indexOf(item.place) < 0 && (
+            <KV k="Location" v={item.place}/>
+          )}
+          {(item.actor1Name || item.actor2Name) && (
+            <KV k="Actors" v={
+              [
+                [item.actor1Name, item.actor1TypeName].filter(Boolean).join(' · '),
+                [item.actor2Name, item.actor2TypeName].filter(Boolean).join(' · '),
+              ].filter(Boolean).join('  →  ') || '—'
+            }/>
+          )}
           {item.tone != null && <KV k="Tone" v={`${item.tone.toFixed(2)} (${item.tone >= 1 ? 'positive' : item.tone <= -1 ? 'negative' : 'neutral'})`}/>}
-          {item.goldstein != null && <KV k="Goldstein" v={item.goldstein.toFixed(1)}/>}
+          {item.goldstein != null && <KV k="Goldstein" v={`${item.goldstein.toFixed(1)} (−10 conflict / +10 coop)`}/>}
           {item.mentions != null && <KV k="Mentions" v={String(item.mentions)}/>}
-          {item.rootCode != null && <KV k="CAMEO" v={String(item.rootCode).padStart(2, '0')}/>}
-          {item.url && <a href={item.url} target="_blank" rel="noopener" className="text-xs text-accent-500 underline truncate block">source →</a>}
+          {item.eventCode && <KV k="CAMEO" v={`${item.eventCode} · ${item.rootName || ''}`}/>}
+          {item.sourceDomain && <KV k="Source" v={item.sourceDomain}/>}
+          {item.url && <a href={item.url} target="_blank" rel="noopener" className="text-xs text-accent-500 underline truncate block">open article →</a>}
+          <div className="text-[10px] opacity-40 pt-1">GDELT 2.0 · 15-min events feed · 8-hour window</div>
         </>}
         {layer === 'reactor' && <>
           <div className="text-lg">{item.name}</div>
@@ -1567,15 +1589,33 @@ function App() {
     localStorage.setItem('ge-dc-filters', JSON.stringify(merged));
   }, [dcFilters]);
 
-  // GDELT news theme (CAMEO QuadClass) + tone (negative/neutral/positive)
-  // multi-selects. Defaults: all themes on, negative-only tone bias — this
-  // is a "global heartbeat" layer, so the default view emphasises
-  // conflict/protest while keeping everything available.
+  // GDELT news category (conflict vs non-conflict) + tone multi-selects.
+  // Default: conflict on, non-conflict off — the API returns the full
+  // stream (all CAMEO root codes) so the UI is responsible for picking
+  // what's interesting. Conflict = CAMEO roots 14–20 (protest through
+  // mass violence); everything else is non-conflict noise by default.
   const [newsFilters, setNewsFilters] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ge-news-filters')) || {}; } catch { return {}; }
+    try {
+      const raw = JSON.parse(localStorage.getItem('ge-news-filters')) || {};
+      // Old schema used quadCoop / quadMat / quadVerbal / quadConflict. The
+      // previous defaults had all four ON, so almost every stored object
+      // carries them whether the user actually customised the filter or
+      // not — we can't tell apart "accepted defaults" from "deliberately
+      // picked". Safer to drop the stale keys and let the new defaults
+      // apply, while preserving tone picks (tone semantics didn't change).
+      if (raw.quadConflict !== undefined || raw.quadVerbal !== undefined ||
+          raw.quadCoop !== undefined || raw.quadMat !== undefined) {
+        return {
+          tonePos: raw.tonePos !== false,
+          toneNeu: raw.toneNeu !== false,
+          toneNeg: raw.toneNeg !== false,
+        };
+      }
+      return raw;
+    } catch { return {}; }
   });
   useEffect(() => {
-    const def = { quadCoop:true, quadMat:true, quadVerbal:true, quadConflict:true, tonePos:true, toneNeu:true, toneNeg:true };
+    const def = { conflict: true, nonConflict: false, tonePos: true, toneNeu: true, toneNeg: true };
     const merged = { ...def, ...newsFilters };
     if (JSON.stringify(merged) !== JSON.stringify(newsFilters)) setNewsFilters(merged);
     localStorage.setItem('ge-news-filters', JSON.stringify(merged));
@@ -1627,7 +1667,7 @@ function App() {
         case 'outage':  return (it.locations?.[0]?.name || 'Internet outage') + (it.ongoing ? ' · ongoing' : '');
         case 'reactor': return it.name || 'Reactor';
         case 'plant':   return it.name || 'Power plant';
-        case 'news':    return (it.place || 'News hotspot') + (it.tone ? ` · tone ${it.tone.toFixed(1)}` : '');
+        case 'news':    return it.summary || ((it.place || 'News') + (it.tone ? ` · tone ${it.tone.toFixed(1)}` : ''));
         default:        return 'Target';
       }
     };
@@ -1989,19 +2029,15 @@ function App() {
         const b = flightBucket(f);
         return flightFilters[b] !== false;
       }),
-      // GDELT news: CAMEO QuadClass 1/2/3/4 → theme chip; tone sign →
-      // positive/neutral/negative chip. If every chip in a group is off,
-      // hide all news (acts as a kill switch without touching the main
-      // toggle). Threshold for "neutral" is ±1 — anything inside that
-      // band reads as balanced coverage.
+      // GDELT news: 2-way conflict / non-conflict category + tone sign
+      // (positive / neutral / negative). The `conflict` boolean is
+      // precomputed server-side from CAMEO root codes 14–20. Turning
+      // both categories off acts as a kill switch without touching the
+      // main layer toggle. Neutral tone band is ±1.
       news: (data.news || []).filter(n => {
-        const q = n.quad;
-        const themeKey =
-          q === 1 ? 'quadCoop' :
-          q === 2 ? 'quadMat' :
-          q === 3 ? 'quadVerbal' :
-          q === 4 ? 'quadConflict' : null;
-        if (themeKey && newsFilters[themeKey] === false) return false;
+        const isConflict = !!n.conflict;
+        if (isConflict  && newsFilters.conflict    === false) return false;
+        if (!isConflict && newsFilters.nonConflict === false) return false;
         const t = n.tone || 0;
         const toneKey = t >= 1 ? 'tonePos' : t <= -1 ? 'toneNeg' : 'toneNeu';
         if (newsFilters[toneKey] === false) return false;
