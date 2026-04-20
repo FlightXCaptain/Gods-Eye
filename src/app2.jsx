@@ -83,7 +83,7 @@ function Icon({ name, className='w-4 h-4' }) {
 function ThemeToggle({ theme, onChange }) {
   return (
     <button onClick={() => onChange(theme === 'dark' ? 'light' : 'dark')}
-            className="glass rounded-full p-2 transition hover:scale-105"
+            className="glass rounded-full p-1.5 sm:p-2 transition hover:scale-105"
             title="Toggle theme">
       <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="w-4 h-4" />
     </button>
@@ -94,7 +94,11 @@ function IconBtn({ children, onClick, active, title }) {
   return (
     <button onClick={onClick} title={title}
       className={classNames(
-        'glass rounded-full p-2 transition hover:scale-105',
+        // Tighter padding on phones so five header buttons (Search +
+        // Layers + News + Rotate + Theme) fit alongside the brand
+        // badge on a 360-375 px viewport without pushing Theme off-
+        // screen. Desktop keeps the original p-2 for a roomier feel.
+        'glass rounded-full p-1.5 sm:p-2 transition hover:scale-105',
         active && 'ring-2 ring-accent-500/50'
       )}>
       {children}
@@ -135,7 +139,7 @@ function SearchBar({ onLocate, targets, theme }) {
 
   return (
     <>
-      <button onClick={()=>setOpen(true)} title="Locate (/)" className="glass rounded-full p-2 sm:pl-3 sm:pr-4 sm:py-2 flex items-center gap-2 text-sm hover:scale-[1.02] transition">
+      <button onClick={()=>setOpen(true)} title="Locate (/)" className="glass rounded-full p-1.5 sm:pl-3 sm:pr-4 sm:py-2 flex items-center gap-2 text-sm hover:scale-[1.02] transition">
         <Icon name="search" className="w-4 h-4 opacity-70" />
         <span className="opacity-70 hidden sm:inline">Locate</span>
         <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-black/10 dark:bg-white/10 opacity-60 hidden sm:inline">/</kbd>
@@ -495,7 +499,11 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
         <Icon name="layers" />
       </IconBtn>
       {open && (
-          <div className="absolute z-50 top-12 right-0 w-60 max-h-[70vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
+          {/* Mobile: viewport-anchored sheet so the popover doesn't clip
+              past the left edge when the Layers button sits in the
+              middle of the action cluster. Desktop: original button-
+              relative dropdown. */}
+          <div className="fixed sm:absolute z-50 inset-x-3 sm:inset-x-auto top-[60px] sm:top-12 sm:right-0 sm:w-60 max-h-[70vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between mb-2 shrink-0">
               <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Layers</div>
               {/* Bulk toggles — flip every layer in `items` on or off in a
@@ -1034,7 +1042,11 @@ function NewsPopover({ news, onPick }) {
         <Icon name="newspaper" />
       </IconBtn>
       {open && (
-        <div className="absolute z-50 top-12 right-0 w-[min(92vw,380px)] max-h-[75vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
+        {/* Mobile: position against the viewport (fixed + inset) so the
+            popover doesn't clip past the left edge when the News button
+            sits in the middle of a 5-button action cluster. Desktop:
+            original button-relative dropdown. */}
+        <div className="fixed sm:absolute z-50 inset-x-3 sm:inset-x-auto top-[60px] sm:top-12 sm:right-0 sm:w-[380px] max-h-[75vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
           {/* Header: title + live count */}
           <div className="flex items-center justify-between mb-2 shrink-0">
             <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">
@@ -2762,7 +2774,7 @@ function App() {
           </div>
           {/* Actions sit next to the brand on phones so they don't get pushed
               off-screen; on sm+ they detach to the right via the outer flex. */}
-          <div className="flex items-center gap-1.5 sm:hidden">
+          <div className="flex items-center gap-1 sm:gap-1.5 sm:hidden">
             <SearchBar onLocate={handleLocate} targets={targets} theme={theme}/>
             <LayersPopover layers={layers} setLayers={setLayers} theme={theme}
   seismicMin={seismicMin} setSeismicMin={setSeismicMin}
@@ -2778,7 +2790,7 @@ function App() {
               onClick={() => toggleAutoRotate()}
               title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
               className={classNames(
-                'glass rounded-full p-2 transition hover:scale-105',
+                'glass rounded-full p-1.5 sm:p-2 transition hover:scale-105',
                 autoRotate && 'ring-2 ring-accent-500/50'
               )}>
               <Icon name={autoRotate ? 'reset' : 'pause'} className="w-4 h-4"/>
@@ -2812,7 +2824,7 @@ function App() {
             onClick={() => toggleAutoRotate()}
             title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
             className={classNames(
-              'glass rounded-full p-2 transition hover:scale-105',
+              'glass rounded-full p-1.5 sm:p-2 transition hover:scale-105',
               autoRotate && 'ring-2 ring-accent-500/50'
             )}>
             <Icon name={autoRotate ? 'reset' : 'pause'} className="w-4 h-4"/>
