@@ -2264,6 +2264,91 @@ function Globe({
         octx.restore();
       }
 
+      // Major dams (OSM Overpass, ~200 entries). Rendered as small
+      // filled horizontal bars — reads as "dam wall" at small sizes.
+      // Mild LOD cell-dedup at low zoom keeps dense river regions
+      // (Himalayas, Alps) readable.
+      if (layers.infrastructure && layers.dams && Array.isArray(data.dams) && data.dams.length) {
+        const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.6 : 1.5;
+        const cell = new Map();
+        for (const d of data.dams) {
+          if (!visibleOn(projection, d.lon, d.lat)) continue;
+          if (cellDeg === 0) { cell.set(d.id, d); continue; }
+          const key = Math.round(d.lon / cellDeg) + '|' + Math.round(d.lat / cellDeg);
+          if (!cell.has(key)) cell.set(key, d);
+        }
+        octx.save();
+        octx.fillStyle = '#3b82f6ee';
+        octx.strokeStyle = '#bfdbfe';
+        octx.lineWidth = 0.7;
+        for (const d of cell.values()) {
+          const pt = projection([d.lon, d.lat]); if (!pt) continue;
+          octx.fillRect(pt[0] - 2.75, pt[1] - 1, 5.5, 2);
+          octx.strokeRect(pt[0] - 2.75, pt[1] - 1, 5.5, 2);
+          pushHit(pt[0], pt[1], 6, 'dam', d);
+        }
+        octx.restore();
+      }
+
+      // Major ports (curated, ~50 entries). Rendered as small upward
+      // triangles — anchor-like silhouette at small sizes, visually
+      // distinct from refinery circles, fab squares, lng diamonds,
+      // and dam bars.
+      if (layers.infrastructure && layers.ports && Array.isArray(data.ports) && data.ports.length) {
+        octx.save();
+        octx.fillStyle = '#10b981ee';
+        octx.strokeStyle = '#a7f3d0';
+        octx.lineWidth = 0.8;
+        for (const p of data.ports) {
+          if (!visibleOn(projection, p.lon, p.lat)) continue;
+          const pt = projection([p.lon, p.lat]); if (!pt) continue;
+          const s = 3.4;
+          octx.beginPath();
+          octx.moveTo(pt[0], pt[1] - s);
+          octx.lineTo(pt[0] + s * 0.9, pt[1] + s * 0.7);
+          octx.lineTo(pt[0] - s * 0.9, pt[1] + s * 0.7);
+          octx.closePath();
+          octx.fill();
+          octx.stroke();
+          pushHit(pt[0], pt[1], 6, 'port', p);
+        }
+        octx.restore();
+      }
+
+      // Oil & gas pipelines (curated, ~20 entries with multi-waypoint
+      // paths). Polylines through each path's waypoints — oil amber,
+      // gas purple. Straight-line segments between projected points
+      // approximate great circles acceptably for the overview story;
+      // segments that cross the back of the globe break cleanly when
+      // `visibleOn` rejects a point.
+      if (layers.infrastructure && layers.pipelines && Array.isArray(data.pipelines) && data.pipelines.length) {
+        octx.save();
+        octx.lineWidth = 1.4;
+        octx.lineCap = 'round';
+        octx.lineJoin = 'round';
+        for (const pl of data.pipelines) {
+          if (!Array.isArray(pl.path) || pl.path.length < 2) continue;
+          octx.strokeStyle = pl.type === 'gas' ? '#8b5cf6dd' : '#d97706dd';
+          let started = false;
+          let hit = null;
+          for (const [lon, lat] of pl.path) {
+            if (!visibleOn(projection, lon, lat)) { if (started) octx.stroke(); started = false; continue; }
+            const pt = projection([lon, lat]); if (!pt) { if (started) octx.stroke(); started = false; continue; }
+            if (!started) {
+              octx.beginPath();
+              octx.moveTo(pt[0], pt[1]);
+              started = true;
+            } else {
+              octx.lineTo(pt[0], pt[1]);
+            }
+            hit = pt;
+          }
+          if (started) octx.stroke();
+          if (hit) pushHit(hit[0], hit[1], 8, 'pipeline', pl);
+        }
+        octx.restore();
+      }
+
       // GDELT news hotspots. Each event is a single geocoded news
       // article cluster, colored by CAMEO QuadClass (1=verbal coop
       // green, 2=material coop sky, 3=verbal conflict amber, 4=material
@@ -3176,6 +3261,15 @@ function Globe({
           )}
           {hover._layer === 'lng' && (
             <span>{hover.name}{hover.type ? ` · ${hover.type}` : ''}{hover.capacity_mtpa ? ` · ${hover.capacity_mtpa} mtpa` : ''}</span>
+          )}
+          {hover._layer === 'dam' && (
+            <span>{hover.name}{hover.dam_type ? ` · ${hover.dam_type.replace(/_/g, ' ')}` : ''}{hover.height_m ? ` · ${hover.height_m} m` : ''}</span>
+          )}
+          {hover._layer === 'port' && (
+            <span>{hover.name}{hover.cargo_type ? ` · ${hover.cargo_type}` : ''}{hover.teu_millions ? ` · ${hover.teu_millions}M TEU` : ''}</span>
+          )}
+          {hover._layer === 'pipeline' && (
+            <span>{hover.name}{hover.type ? ` · ${hover.type}` : ''}{hover.length_km ? ` · ${Math.round(hover.length_km).toLocaleString()} km` : ''}</span>
           )}
           {hover._layer === 'news' && (
             <span>{hover.place || 'Unlocated'} · {hover.mentions || 1}× mentions · tone {hover.tone?.toFixed?.(1) || 0}</span>
