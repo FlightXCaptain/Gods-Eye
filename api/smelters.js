@@ -1,8 +1,17 @@
-// Smelters & mills — non-oil industrial refining / processing plants
-// via OSM Overpass. Covers metal smelters (steel, aluminium, copper,
-// lead, zinc) and sugar refineries / mills. Explicitly distinct from
-// the oil refineries layer which filters for petroleum-specific
-// entries; this layer captures the other half of `industrial=refinery`.
+// Smelters, mills, and non-oil refineries via OSM Overpass.
+//
+// Scope:
+//   • Explicit metal smelters (steel, aluminium, copper, lead, zinc)
+//   • Alumina / bauxite refineries
+//   • Sugar refineries & mills
+//   • Generic `industrial=refinery` entries whose NAME identifies them
+//     as non-oil (sugar, metal, alumina, salt, cement, chemical, polymer,
+//     paper/pulp) — MIRRORS the oil refineries filter so any entry
+//     rejected there shows up here instead, rather than vanishing.
+//
+// Net effect: users see ALL industrial refineries on the globe —
+// oil variants in the Oil refineries sub-layer, everything else in
+// Smelters & mills. Neither layer has accidental overlap.
 
 import { loadOverpassDataset } from './_overpass.js';
 
@@ -15,6 +24,9 @@ const QUERY = `
   nwr["industrial"="steel"];
   nwr["industrial"="aluminium_smelter"];
   nwr["industrial"="aluminium"];
+  nwr["industrial"="alumina_refinery"];
+  nwr["industrial"="alumina_plant"];
+  nwr["industrial"="alumina"];
   nwr["industrial"="copper_smelter"];
   nwr["industrial"="copper"];
   nwr["industrial"="lead_smelter"];
@@ -22,31 +34,83 @@ const QUERY = `
   nwr["industrial"="sugar_refinery"];
   nwr["industrial"="sugar_mill"];
   nwr["industrial"="sugar"];
+  nwr["industrial"="refinery"];
 );
 out center;
 `;
 
-function inferKind(tags) {
-  const v = tags.industrial || '';
+// Strip diacritics so French / Spanish / Turkish names match the
+// English-stem regexes below.
+function normalize(s) { return s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+
+// A raw `industrial=refinery` entry is included here IFF its name
+// matches one of these non-oil keywords. Kept in lockstep with the oil
+// refineries NON_OIL_PATTERNS list so the two layers don't overlap.
+const NON_OIL_NAME_RE = new RegExp(
+  '\\b(' +
+    'sugar|sucre|acucar|azucar|zucker|' +
+    'paper[-_ ]?mill|pulp[-_ ]?mill|sawmill|kraft|' +
+    'steel|stahl|acier|acciaio|acero|' +
+    'copper|kupfer|cuivre|cobre|' +
+    'aluminium|aluminum|alumina|bauxite|' +
+    'smelter|fundicion|fonderie|schmelze|' +
+    'lead|zinc|nickel|' +
+    'salt|' +
+    'cement|ciment|cemento|zement|' +
+    'polymer|polimer|polymere|polypropylene|polyethylene' +
+  ')\\b',
+  'i'
+);
+
+// Infer a kind label for the detail card. Checks explicit tag first,
+// falls back to a name-keyword sniff.
+function inferKind(tags, nName) {
+  const v = (tags.industrial || '').toLowerCase();
   if (v.includes('sugar')) return 'sugar';
   if (v.includes('steel')) return 'steel';
+  if (v.includes('alumina')) return 'alumina';
   if (v.includes('aluminium') || v.includes('aluminum')) return 'aluminium';
   if (v.includes('copper')) return 'copper';
   if (v.includes('lead')) return 'lead';
   if (v.includes('zinc')) return 'zinc';
   if (v === 'smelter') return 'smelter';
+  // Sniff name for explicit keyword
+  if (/alumina|bauxite/i.test(nName)) return 'alumina';
+  if (/sugar|sucre|acucar|azucar|zucker/i.test(nName)) return 'sugar';
+  if (/steel|stahl|acier|acciaio|acero/i.test(nName)) return 'steel';
+  if (/copper|kupfer|cuivre|cobre/i.test(nName)) return 'copper';
+  if (/aluminium|aluminum/i.test(nName)) return 'aluminium';
+  if (/\bzinc\b/i.test(nName)) return 'zinc';
+  if (/\blead\b/i.test(nName)) return 'lead';
+  if (/\bnickel\b/i.test(nName)) return 'nickel';
+  if (/cement|ciment|cemento|zement/i.test(nName)) return 'cement';
+  if (/paper|pulp|sawmill|kraft/i.test(nName)) return 'paper';
+  if (/salt/i.test(nName)) return 'salt';
+  if (/polymer|polimer|polymere|polypropylene|polyethylene/i.test(nName)) return 'polymer';
   return 'other';
 }
 
 function project(el) {
   const tags = el.tags;
-  const name = tags['name:en'] || tags.name;
-  if (!name) return null;
+  const rawName = tags['name:en'] || tags.name;
+  if (!rawName) return null;
+  const nName = normalize(rawName);
+
+  // If the element's `industrial` tag is specifically a smelter/mill
+  // type (anything other than the ambiguous 'refinery'), keep it.
+  const explicit = tags.industrial && tags.industrial !== 'refinery';
+  if (!explicit) {
+    // It's `industrial=refinery` — include only if name identifies
+    // it as non-oil. Otherwise it either belongs in oil refineries
+    // or is genuinely ambiguous.
+    if (!NON_OIL_NAME_RE.test(nName)) return null;
+  }
+
   return {
     id: `osm-${el.type}-${el.id}`,
-    name,
+    name: rawName,
     operator: tags.operator || null,
-    kind: inferKind(tags),
+    kind: inferKind(tags, nName),
     country: tags['addr:country'] || null,
     lat: el.lat,
     lon: el.lon,

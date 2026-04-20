@@ -72,7 +72,7 @@ const NON_OIL_PATTERNS = [
   // Metals (smelters & refineries)
   /\bsteel\b/i, /\bstahl\b/i, /\bacier\b/i, /\bacciaio\b/i, /\bacero\b/i,
   /\bcopper\b/i, /\bkupfer\b/i, /\bcuivre\b/i, /\bcobre\b/i,
-  /\baluminium\b/i, /\baluminum\b/i,
+  /\baluminium\b/i, /\baluminum\b/i, /\balumina\b/i, /\bbauxite\b/i,
   /\bsmelter\b/i, /\bfundici[óo]n\b/i, /\bfonderie\b/i, /\bschmelze\b/i,
   /\blead\b/i, /\bzinc\b/i, /\bnickel\b/i,
   /\bgold\s+mine\b/i, /\bsilver\s+mine\b/i,
