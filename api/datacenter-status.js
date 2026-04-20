@@ -22,7 +22,8 @@ const CACHE_TTL = 5 * 60 * 1000;    // 5 min — status feeds update fast
 let cache = null;
 
 // Small safe-fetch with a 6 s timeout so one slow provider doesn't stall
-// the whole response.
+// the whole response. Auto-detects UTF-16 BOM (AWS's currentevents feed
+// is UTF-16 BE) and decodes with the right TextDecoder before parsing.
 async function safeJson(url, timeoutMs = 6000) {
   try {
     const ctrl = new AbortController();
@@ -30,10 +31,21 @@ async function safeJson(url, timeoutMs = 6000) {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'gods-eye/1.0 (+https://gods-eye-phi.vercel.app)' },
       signal: ctrl.signal,
+      redirect: 'follow',
     });
     clearTimeout(t);
     if (!res.ok) return null;
-    return await res.json();
+    const buf = await res.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let text;
+    if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+      text = new TextDecoder('utf-16be').decode(bytes.subarray(2));
+    } else if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+      text = new TextDecoder('utf-16le').decode(bytes.subarray(2));
+    } else {
+      text = new TextDecoder('utf-8').decode(bytes);
+    }
+    return JSON.parse(text);
   } catch (e) {
     console.warn('[dc-status] fetch failed:', url.replace(/^https?:\/\//, '').split('/')[0], e.message);
     return null;
@@ -90,68 +102,59 @@ async function fetchStatuspage(url, operator) {
   return { state, incidents };
 }
 
-// AWS's public feed lumps archive + current. `current` is present only
-// during active events; when empty, AWS is fully green.
+// AWS's older /data.json was deprecated. The current public events feed
+// is at /public/currentevents, returned as UTF-16 BE JSON — safeJson
+// auto-decodes. Each element has { date, arn, eventTypeCode, ... } where
+// the ARN encodes the region and service.
 async function fetchAws() {
-  const j = await safeJson('https://status.aws.amazon.com/data.json');
-  if (!j) return { state: 'unknown', incidents: [] };
-  const cur = Array.isArray(j.current) ? j.current : [];
-  const incidents = cur.map(e => ({
-    id: e.date || e.summary || e.service_name,
-    title: e.service_name ? `${e.service_name} · ${e.summary || 'service event'}` : (e.summary || 'AWS event'),
-    // AWS encodes region in the service_name suffix (e.g. "Amazon EC2 (N. Virginia)").
-    regions: e.service_name ? extractAwsRegions(e.service_name) : [],
-    startedAt: e.date || null,
-    severity: e.status || null,
-  }));
+  const j = await safeJson('https://health.aws.amazon.com/public/currentevents');
+  if (!Array.isArray(j)) return { state: 'unknown', incidents: [] };
+  const incidents = j.map(e => {
+    // ARN shape: arn:aws:health:<region>::event/<service>/<typeCode>/<id>
+    const arnMatch = /^arn:aws:health:([^:]+)::event\/([^/]+)\/([^/]+)/.exec(e.arn || '');
+    const region  = arnMatch?.[1] || null;
+    const service = arnMatch?.[2] || null;
+    const typeCode = arnMatch?.[3] || e.eventTypeCode || null;
+    // Turn MULTIPLE_SERVICES_OPERATIONAL_ISSUE into "Multiple services
+    // operational issue" — readable in the dossier.
+    const pretty = typeCode ? typeCode.toLowerCase().replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()) : 'AWS event';
+    return {
+      id: e.arn || `aws-${e.date || Date.now()}`,
+      title: service ? `${service.toUpperCase()} · ${pretty}` : pretty,
+      regions: region ? [region] : [],
+      startedAt: e.date ? new Date(parseInt(e.date, 10) * 1000).toISOString() : null,
+      severity: null,
+    };
+  });
   return { state: incidents.length ? 'degraded' : 'operational', incidents };
-}
-function extractAwsRegions(serviceName) {
-  // Very coarse — AWS uses friendly region names in service_name.
-  const map = {
-    'N. VIRGINIA':   'us-east-1',
-    'OHIO':          'us-east-2',
-    'N. CALIFORNIA': 'us-west-1',
-    'OREGON':        'us-west-2',
-    'CANADA':        'ca-central-1',
-    'IRELAND':       'eu-west-1',
-    'LONDON':        'eu-west-2',
-    'PARIS':         'eu-west-3',
-    'FRANKFURT':     'eu-central-1',
-    'ZURICH':        'eu-central-2',
-    'STOCKHOLM':     'eu-north-1',
-    'MILAN':         'eu-south-1',
-    'TOKYO':         'ap-northeast-1',
-    'SEOUL':         'ap-northeast-2',
-    'OSAKA':         'ap-northeast-3',
-    'SINGAPORE':     'ap-southeast-1',
-    'SYDNEY':        'ap-southeast-2',
-    'JAKARTA':       'ap-southeast-3',
-    'MELBOURNE':     'ap-southeast-4',
-    'MUMBAI':        'ap-south-1',
-    'HYDERABAD':     'ap-south-2',
-    'HONG KONG':     'ap-east-1',
-    'SAO PAULO':     'sa-east-1',
-    'SÃO PAULO':     'sa-east-1',
-    'BAHRAIN':       'me-south-1',
-    'UAE':           'me-central-1',
-    'CAPE TOWN':     'af-south-1',
-    'ISRAEL':        'il-central-1',
-  };
-  const u = serviceName.toUpperCase();
-  for (const [label, region] of Object.entries(map)) {
-    if (u.includes(label)) return [region];
-  }
-  return [];
 }
 
 // ── Top-level handler ───────────────────────────────────────────────
+
+// Oracle's OCI status page doesn't expose summary.json or incidents.json
+// like a standard Statuspage deployment — only the aggregate indicator
+// at /api/v2/status.json. Returns { status: { indicator, description } }
+// with indicator ∈ {none, minor, major, critical}. No per-incident detail.
+async function fetchOci() {
+  const j = await safeJson('https://ocistatus.oraclecloud.com/api/v2/status.json');
+  if (!j?.status) return { state: 'unknown', incidents: [] };
+  const ind = (j.status.indicator || '').toLowerCase();
+  const state = ind === 'none'     ? 'operational'
+              : ind === 'critical' ? 'outage'
+              : ind && ind !== 'unknown' ? 'degraded'
+              : 'unknown';
+  return {
+    state,
+    incidents: [],
+    note: j.status.description || undefined,
+  };
+}
 
 async function buildList() {
   const [gcp, cloudflare, oracle, aws] = await Promise.all([
     fetchGcp(),
     fetchStatuspage('https://www.cloudflarestatus.com/api/v2/summary.json', 'cloudflare'),
-    fetchStatuspage('https://ocistatus.oraclecloud.com/api/v2/summary.json', 'oci'),
+    fetchOci(),
     fetchAws(),
   ]);
   return {
