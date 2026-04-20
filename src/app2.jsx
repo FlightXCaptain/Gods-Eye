@@ -380,6 +380,20 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <path d="M5 15 A7 7 0 0 0 12 19 A7 7 0 0 0 19 15"/>
         </svg>
       );
+    case 'gasproc':
+      // Three linked spherical tanks — cluster aesthetic reads as a
+      // gas-processing complex, distinct from LNG's single sphere.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="6" cy="14" r="3"/>
+          <circle cx="12" cy="14" r="3"/>
+          <circle cx="18" cy="14" r="3"/>
+          <line x1="6" y1="11" x2="6" y2="8"/>
+          <line x1="12" y1="11" x2="12" y2="8"/>
+          <line x1="18" y1="11" x2="18" y2="8"/>
+          <line x1="3" y1="19" x2="21" y2="19" opacity="0.5"/>
+        </svg>
+      );
     case 'pipeline':
       // Two segments with a valve-joint in the middle, plus endcaps —
       // reads as "pipe" rather than generic "line".
@@ -507,7 +521,8 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       {/* Energy group */}
                       {[
                         ['refineries', 'Oil refineries',    'refinery',  '#a16207'],
-                        ['lng',        'LNG terminals',     'lng',       '#93c5fd'],
+                        ['gasproc',    'Gas processing',    'gasproc',   '#0e7490'],
+                        ['lng',        'LNG terminals',     'lng',       '#60a5fa'],
                         ['pipelines',  'Oil / gas pipelines','pipeline', '#d97706'],
                         ['plants',     'Power plants',      'bolt',      '#f59e0b'],
                         ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
@@ -1084,6 +1099,13 @@ function Dossier({ item, onClose }) {
           <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
           <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name + ' LNG')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
         </>}
+        {layer === 'gasproc' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Gas processing plant{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
         {layer === 'dam' && <>
           <div className="text-lg">{item.name}</div>
           <div className="text-sm opacity-70">Dam{item.dam_type ? ` · ${item.dam_type.replace(/_/g, ' ')}` : ''}</div>
@@ -1530,7 +1552,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, dams:false, ports:false, pipelines:false, infrastructure:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, gasproc:false, dams:false, ports:false, pipelines:false, infrastructure:false };
     // One-shot migration: users who had any infrastructure sub-layer enabled
     // before the parent toggle existed should have the parent auto-enabled
     // on first load of this version. Detect by: `infrastructure` key absent
@@ -1839,6 +1861,7 @@ function App() {
     if (typeof window.fetchFabs === 'function') window.fetchFabs().then(f => { if (alive) setData(d => ({ ...d, fabs: f })); });
     if (typeof window.fetchRefineries === 'function') window.fetchRefineries().then(x => { if (alive) setData(d => ({ ...d, refineries: x })); });
     if (typeof window.fetchLngTerminals === 'function') window.fetchLngTerminals().then(x => { if (alive) setData(d => ({ ...d, lng: x })); });
+    if (typeof window.fetchGasProcessing === 'function') window.fetchGasProcessing().then(x => { if (alive) setData(d => ({ ...d, gasproc: x })); });
     if (typeof window.fetchDams === 'function') window.fetchDams().then(x => { if (alive) setData(d => ({ ...d, dams: x })); });
     if (typeof window.fetchPortsMajor === 'function') window.fetchPortsMajor().then(x => { if (alive) setData(d => ({ ...d, ports: x })); });
     if (typeof window.fetchPipelines === 'function') window.fetchPipelines().then(x => { if (alive) setData(d => ({ ...d, pipelines: x })); });
