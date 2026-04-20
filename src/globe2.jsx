@@ -2321,19 +2321,31 @@ function Globe({
       // approximate great circles acceptably for the overview story;
       // segments that cross the back of the globe break cleanly when
       // `visibleOn` rejects a point.
+      //
+      // Hit targets: register at every waypoint AND sample ~4 interior
+      // points per segment so clicking anywhere along the line opens
+      // the detail card (not just the endpoint).
       if (layers.infrastructure && layers.pipelines && Array.isArray(data.pipelines) && data.pipelines.length) {
         octx.save();
         octx.lineWidth = 1.4;
         octx.lineCap = 'round';
         octx.lineJoin = 'round';
+        const SEG_SAMPLES = 4; // interior hit samples per segment
         for (const pl of data.pipelines) {
           if (!Array.isArray(pl.path) || pl.path.length < 2) continue;
           octx.strokeStyle = pl.type === 'gas' ? '#8b5cf6dd' : '#d97706dd';
           let started = false;
-          let hit = null;
+          let prevPt = null;
           for (const [lon, lat] of pl.path) {
-            if (!visibleOn(projection, lon, lat)) { if (started) octx.stroke(); started = false; continue; }
-            const pt = projection([lon, lat]); if (!pt) { if (started) octx.stroke(); started = false; continue; }
+            if (!visibleOn(projection, lon, lat)) {
+              if (started) octx.stroke();
+              started = false; prevPt = null; continue;
+            }
+            const pt = projection([lon, lat]);
+            if (!pt) {
+              if (started) octx.stroke();
+              started = false; prevPt = null; continue;
+            }
             if (!started) {
               octx.beginPath();
               octx.moveTo(pt[0], pt[1]);
@@ -2341,10 +2353,22 @@ function Globe({
             } else {
               octx.lineTo(pt[0], pt[1]);
             }
-            hit = pt;
+            // Waypoint hit target.
+            pushHit(pt[0], pt[1], 8, 'pipeline', pl);
+            // Interior hit samples between prevPt and pt — evenly
+            // spaced in screen space, which for short/medium pipeline
+            // segments is close enough to evenly-spaced-along-route.
+            if (prevPt) {
+              for (let s = 1; s <= SEG_SAMPLES; s++) {
+                const t = s / (SEG_SAMPLES + 1);
+                const mx = prevPt[0] + (pt[0] - prevPt[0]) * t;
+                const my = prevPt[1] + (pt[1] - prevPt[1]) * t;
+                pushHit(mx, my, 8, 'pipeline', pl);
+              }
+            }
+            prevPt = pt;
           }
           if (started) octx.stroke();
-          if (hit) pushHit(hit[0], hit[1], 8, 'pipeline', pl);
         }
         octx.restore();
       }
