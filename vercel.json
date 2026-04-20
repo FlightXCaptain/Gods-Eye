@@ -3,6 +3,7 @@
     "api/stream.js":            { "memory": 320, "maxDuration": 120 },
 
     "api/flight-route.js":      { "memory": 512, "maxDuration": 20 },
+    "api/airlines.js":          { "memory": 192, "maxDuration": 10 },
 
     "api/fires.js":             { "memory": 256, "maxDuration": 30 },
     "api/datacenters.js":       { "memory": 256, "maxDuration": 15 },
