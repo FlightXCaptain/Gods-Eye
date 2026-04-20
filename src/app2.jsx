@@ -310,6 +310,19 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <path d="M8 1 L3 8 L6.5 8 L5 13 L11 6 L7.5 6 L9 1 Z" fill={color}/>
         </svg>
       );
+    case 'infra':
+      // Stylized industrial silhouette: two tanks + a stack, evoking a
+      // refinery / plant footprint. Works as a generic "fixed-location
+      // infrastructure" mark since the sub-panel has its own per-layer
+      // glyphs.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="11" width="5" height="8" rx="0.5"/>
+          <rect x="16" y="8" width="5" height="11" rx="0.5"/>
+          <path d="M11 19 L11 6 L13 4 L13 19 Z"/>
+          <line x1="2" y1="19" x2="22" y2="19"/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -319,6 +332,10 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                          newsFilters, setNewsFilters,
                          dcFilters, setDcFilters }) {
   const [open, setOpen] = useState(false);
+  // Expand/collapse for the Critical Infrastructure sub-panel. Independent
+  // of `open` (popover visibility) and of `layers.infrastructure` (master
+  // gate) — users can inspect sub-options before enabling the parent.
+  const [infraExpanded, setInfraExpanded] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
     ['ships','Ships',     'ship',    '#22d3ee'],
@@ -328,12 +345,9 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['cyclones','Tropical cyclones', 'storm', '#f97316'],
     ['outages','Internet outages', 'bolt', '#ef4444'],
     ['events','Natural events', 'fire', '#ef4444'],
-    ['cables','Submarine cables', 'aurora', '#22d3ee'],
-    ['reactors','Nuclear reactors', 'radiation', '#22c55e'],
-    ['plants','Power plants', 'bolt', '#f59e0b'],
+    ['infrastructure','Critical Infrastructure', 'infra', '#94a3b8'],
     ['news','News hotspots', 'wiki', '#ef4444'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
-    ['datacenters','Data centers', 'sat', '#5eead4'],
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
     ['aurora','Aurora',   'aurora',  '#84cca3'],
     ['wind','Wind flow',  'aurora',  '#60a5fa'],
@@ -410,12 +424,127 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       <GlyphSVG kind={glyph} color={col} size={14}/>
                     </span>
                     <span className="text-sm flex-1">{label}</span>
+                    {k === 'infrastructure' && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setInfraExpanded(x => !x); }}
+                        className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-black/10 dark:hover:bg-white/10 transition-transform"
+                        style={{ transform: infraExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                        aria-label={infraExpanded ? 'Collapse infrastructure sub-layers' : 'Expand infrastructure sub-layers'}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M3 1 L7 5 L3 9 Z"/></svg>
+                      </button>
+                    )}
                     {k === 'quakes' && (
                       <span className="font-mono text-[10px] tabular-nums text-accent-500 shrink-0">
                         M{seismicMin.toFixed(1)}+
                       </span>
                     )}
                   </label>
+                  {/* Critical Infrastructure sub-panel. Rendered only when
+                      the chevron has been expanded, regardless of whether
+                      the parent checkbox is on (so users can inspect
+                      sub-options pre-enable). Visual groups separated by
+                      thin dividers; no group headers. When the Data centers
+                      sub-layer is enabled, its operator filter grid nests
+                      below it — preserved verbatim from the pre-refactor
+                      datacenters sub-filter UI. */}
+                  {k === 'infrastructure' && infraExpanded && (
+                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
+                      {/* Energy group */}
+                      {[
+                        ['plants',     'Power plants',      'bolt',      '#f59e0b'],
+                        ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
+                      ].map(([sk, slabel, sglyph, scol]) => (
+                        <label key={sk} className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!layers[sk]}
+                            onChange={e => setLayers(x => ({ ...x, [sk]: e.target.checked }))}
+                            className="accent-accent-500 scale-90"
+                          />
+                          <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: scol }}>
+                            <GlyphSVG kind={sglyph} color={scol} size={12}/>
+                          </span>
+                          <span className="opacity-80">{slabel}</span>
+                        </label>
+                      ))}
+                      {/* Divider between Energy and Connectivity */}
+                      <div className="border-t border-black/10 dark:border-white/10 my-1"/>
+                      {/* Connectivity group */}
+                      <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!layers.cables}
+                          onChange={e => setLayers(x => ({ ...x, cables: e.target.checked }))}
+                          className="accent-accent-500 scale-90"
+                        />
+                        <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: '#22d3ee' }}>
+                          <GlyphSVG kind="aurora" color="#22d3ee" size={12}/>
+                        </span>
+                        <span className="opacity-80">Submarine cables</span>
+                      </label>
+                      <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!layers.datacenters}
+                          onChange={e => setLayers(x => ({ ...x, datacenters: e.target.checked }))}
+                          className="accent-accent-500 scale-90"
+                        />
+                        <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: '#5eead4' }}>
+                          <GlyphSVG kind="sat" color="#5eead4" size={12}/>
+                        </span>
+                        <span className="opacity-80">Data centers</span>
+                      </label>
+                      {/* Datacenter operator sub-filter — nested below the
+                          Data centers sub-row when enabled. 6 hyperscalers +
+                          top 6 colo operators + Other bucket, preserved
+                          verbatim from pre-refactor behavior. */}
+                      {layers.datacenters && dcFilters && (
+                        <div className="pl-6 pr-0 pb-1 pt-0.5 space-y-1">
+                          <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Hyperscalers</div>
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                            {[
+                              ['aws',        'AWS',        '#ff9900'],
+                              ['azure',      'Azure',      '#0078d4'],
+                              ['gcp',        'GCP',        '#4285f4'],
+                              ['oci',        'Oracle',     '#c74634'],
+                              ['alibaba',    'Alibaba',    '#ff6a00'],
+                              ['cloudflare', 'Cloudflare', '#f48120'],
+                            ].map(([dk, dlabel, dcol]) => (
+                              <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                                <input type="checkbox" checked={dcFilters[dk] !== false}
+                                       onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
+                                       className="accent-accent-500 scale-90"/>
+                                <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: dcol }}/>
+                                <span className="opacity-80 truncate">{dlabel}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider pt-1">Colo operators (PeeringDB)</div>
+                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                            {[
+                              ['Equinix',        'Equinix'],
+                              ['Digital Realty', 'Digital Realty'],
+                              ['NTT',            'NTT'],
+                              ['CoreSite',       'CoreSite'],
+                              ['Telehouse',      'Telehouse'],
+                              ['Cologix',        'Cologix'],
+                              ['Other',          'Other colos'],
+                            ].map(([dk, dlabel]) => (
+                              <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                                <input type="checkbox" checked={dcFilters[dk] !== false}
+                                       onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
+                                       className="accent-accent-500 scale-90"/>
+                                <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#5eead4' }}/>
+                                <span className="opacity-80 truncate">{dlabel}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {/* Seismic magnitude floor — only the quake layer gets a
                       secondary control. Placed directly below the toggle so
                       the visual grouping ("this modifies THAT") is obvious. */}
@@ -471,52 +600,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                           <span className="opacity-80 truncate">{slabel}</span>
                         </label>
                       ))}
-                    </div>
-                  )}
-                  {/* Datacenter operator sub-filter — 6 hyperscalers +
-                      top 6 colo operators + Other bucket. Grouped in
-                      two labelled sections because the mix is long. */}
-                  {k === 'datacenters' && layers.datacenters && dcFilters && (
-                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-1">
-                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider">Hyperscalers</div>
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-                        {[
-                          ['aws',        'AWS',        '#ff9900'],
-                          ['azure',      'Azure',      '#0078d4'],
-                          ['gcp',        'GCP',        '#4285f4'],
-                          ['oci',        'Oracle',     '#c74634'],
-                          ['alibaba',    'Alibaba',    '#ff6a00'],
-                          ['cloudflare', 'Cloudflare', '#f48120'],
-                        ].map(([dk, dlabel, dcol]) => (
-                          <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
-                            <input type="checkbox" checked={dcFilters[dk] !== false}
-                                   onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
-                                   className="accent-accent-500 scale-90"/>
-                            <span className="inline-block w-1.5 h-1.5 rounded-sm shrink-0" style={{ background: dcol }}/>
-                            <span className="opacity-80 truncate">{dlabel}</span>
-                          </label>
-                        ))}
-                      </div>
-                      <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider pt-1">Colo operators (PeeringDB)</div>
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
-                        {[
-                          ['Equinix',        'Equinix'],
-                          ['Digital Realty', 'Digital Realty'],
-                          ['NTT',            'NTT'],
-                          ['CoreSite',       'CoreSite'],
-                          ['Telehouse',      'Telehouse'],
-                          ['Cologix',        'Cologix'],
-                          ['Other',          'Other colos'],
-                        ].map(([dk, dlabel]) => (
-                          <label key={dk} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
-                            <input type="checkbox" checked={dcFilters[dk] !== false}
-                                   onChange={e => setDcFilters(x => ({ ...x, [dk]: e.target.checked }))}
-                                   className="accent-accent-500 scale-90"/>
-                            <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#5eead4' }}/>
-                            <span className="opacity-80 truncate">{dlabel}</span>
-                          </label>
-                        ))}
-                      </div>
                     </div>
                   )}
                   {k === 'news' && layers.news && (
@@ -1289,11 +1372,15 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false };
-    // Merge stored preferences on top of defaults. Off-by-default layers
-    // (wind, tsunamis) can be toggled on via the Layers popover and their
-    // choice persists across reloads.
-    const merged = { ...def, ...layers };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, infrastructure:false };
+    // One-shot migration: users who had any infrastructure sub-layer enabled
+    // before the parent toggle existed should have the parent auto-enabled
+    // on first load of this version. Detect by: `infrastructure` key absent
+    // from stored state AND at least one sub-layer true. Idempotent because
+    // next load will have `infrastructure` in stored state.
+    const anyOldInfra = layers.plants || layers.reactors || layers.cables || layers.datacenters;
+    const needsMigration = layers.infrastructure === undefined && anyOldInfra;
+    const merged = { ...def, ...layers, ...(needsMigration ? { infrastructure: true } : {}) };
     if (JSON.stringify(merged) !== JSON.stringify(layers)) setLayers(merged);
     localStorage.setItem('ge-layers', JSON.stringify(merged));
   }, [layers]);
