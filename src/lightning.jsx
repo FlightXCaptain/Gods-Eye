@@ -1,9 +1,9 @@
 /* Lightning client — connects directly to Blitzortung's public WebSocket
    from the browser.
 
-   We originally proxied this through /api/lightning-stream (Vercel
-   serverless WS → SSE fan-out) so one upstream connection could serve
-   many browsers. In practice Blitzortung silently drops connections
+   We originally tried to proxy this through a Vercel serverless
+   WS → SSE fan-out so one upstream connection could serve many
+   browsers. In practice Blitzortung silently drops connections
    from cloud IP ranges (Vercel/AWS): the handshake hangs with no error
    or close frame, the function times out at 5 minutes, no strikes ever
    arrive. Their own map.blitzortung.org client connects directly from

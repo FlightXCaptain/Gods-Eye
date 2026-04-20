@@ -1,6 +1,6 @@
 // Shared Neon Postgres connection + schema setup for server-side ship
-// position history. Used by api/ships-stream.js (writes) and api/ship-
-// history.js (reads).
+// position history. Used by api/stream.js (writes, via its ships section)
+// and api/ship-history.js (reads).
 //
 // Setup (one-time, in Vercel Marketplace):
 //   1. Open the gods-eye project on Vercel.

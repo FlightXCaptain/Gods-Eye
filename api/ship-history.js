@@ -1,7 +1,7 @@
 // Ship position history — reads from Neon Postgres.
 //
-// Writes are performed by api/ships-stream.js at ~30-min intervals per
-// MMSI. This endpoint answers the client's "give me the track for vessel
+// Writes are performed by api/stream.js at ~30-min intervals per MMSI
+// (the ships half of the consolidated stream endpoint). This endpoint answers the client's "give me the track for vessel
 // X over the last 30 days" query.
 //
 // Graceful no-op when DATABASE_URL isn't set: returns 503 with
