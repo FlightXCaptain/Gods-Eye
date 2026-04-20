@@ -1,0 +1,21 @@
+{
+  "functions": {
+    "api/flights-stream.js":    { "memory": 256, "maxDuration": 120 },
+    "api/ships-stream.js":      { "memory": 256, "maxDuration": 120 },
+    "api/lightning-stream.js":  { "memory": 192, "maxDuration": 120 },
+
+    "api/flight-route.js":      { "memory": 512, "maxDuration": 20 },
+
+    "api/fires.js":             { "memory": 256, "maxDuration": 30 },
+    "api/datacenters.js":       { "memory": 256, "maxDuration": 15 },
+    "api/datacenter-status.js": { "memory": 192, "maxDuration": 15 },
+    "api/ocean-currents.js":    { "memory": 256, "maxDuration": 30 },
+    "api/gdelt.js":             { "memory": 256, "maxDuration": 20 },
+    "api/wind.js":              { "memory": 256, "maxDuration": 30 },
+    "api/cables.js":            { "memory": 192, "maxDuration": 15 },
+    "api/cyclones.js":          { "memory": 192, "maxDuration": 20 },
+    "api/ship-history.js":      { "memory": 192, "maxDuration": 10 },
+    "api/radar-outages.js":     { "memory": 192, "maxDuration": 15 },
+    "api/power-plants.js":      { "memory": 192, "maxDuration": 20 }
+  }
+}
