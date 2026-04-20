@@ -1868,12 +1868,14 @@ function Globe({
           const col = mag >= 5 ? '#f43f5e' : mag >= 4 ? '#fb923c' : mag >= 3 ? '#fbbf24' : '#d97706';
 
           if (mag >= 5) {
-            // Significant — still keep the pulse, just smaller.
-            const phase = ((now/1000) + (q.id?.charCodeAt(0) || 0))%1.8/1.8;
+            // Significant — gentle expanding ring once every ~3.6 s
+            // (was 1.8 s — too fast, multiple M5+ quakes pulsing out
+            // of phase added to overall flicker). Lower max alpha too.
+            const phase = ((now/1000) + (q.id?.charCodeAt(0) || 0))%3.6/3.6;
             const sz = 9 + (mag - 5) * 1.4;
             octx.beginPath();
-            octx.arc(px, py, sz*0.7 + phase*10*animationIntensity, 0, Math.PI*2);
-            octx.strokeStyle = `rgba(244,63,94,${0.45*(1-phase)*(1-age*0.6)})`;
+            octx.arc(px, py, sz*0.7 + phase*8*animationIntensity, 0, Math.PI*2);
+            octx.strokeStyle = `rgba(244,63,94,${0.30*(1-phase)*(1-age*0.6)})`;
             octx.lineWidth = 1; octx.stroke();
             iconQuake(octx, px, py, sz, col, isDark);
             pushHit(px, py, Math.max(sz, 8), 'quake', q);
@@ -2324,22 +2326,24 @@ function Globe({
           if (!visibleOn(projection, s.lon, s.lat)) continue;
           const pt = projection([s.lon, s.lat]);
           if (!pt) continue;
-          // Lightning was perceived as constant strobe — Blitzortung
-          // delivers thousands of strikes/min globally so at any moment
-          // there are dozens of bright flashes in various age states.
-          // Dimmer core (0.55 max alpha vs 0.95), smaller halo, faster
-          // decay → reads as subtle pinprick activity instead of
-          // dominating the view.
+          // Restored brightness — user reports never seeing a strike,
+          // so dimming was the wrong call. The earlier "constant
+          // strobe" complaint turned out to be the ISS pulse, not
+          // lightning. (See iss-pulse fix in this same PR.)
           const alpha = Math.max(0, 1 - age);
-          octx.fillStyle = `rgba(254, 240, 138, ${(alpha * 0.55).toFixed(3)})`;
+          octx.fillStyle = `rgba(254, 240, 138, ${(alpha * 0.95).toFixed(3)})`;
           octx.beginPath();
-          octx.arc(pt[0], pt[1], 1.2, 0, Math.PI * 2);
+          octx.arc(pt[0], pt[1], 1.5, 0, Math.PI * 2);
           octx.fill();
-          const haloR = 2 + age * 5;
-          const haloAlpha = Math.max(0, (1 - age) * 0.25);
-          octx.fillStyle = `rgba(254, 240, 138, ${haloAlpha.toFixed(3)})`;
+          const haloR = 3 + age * 9;
+          const haloAlpha = Math.max(0, (1 - age) * 0.55);
+          octx.fillStyle = `rgba(254, 240, 138, ${(haloAlpha * 0.4).toFixed(3)})`;
           octx.beginPath();
           octx.arc(pt[0], pt[1], haloR, 0, Math.PI * 2);
+          octx.fill();
+          octx.fillStyle = `rgba(254, 240, 138, ${haloAlpha.toFixed(3)})`;
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], haloR * 0.5, 0, Math.PI * 2);
           octx.fill();
         }
       }
@@ -2738,9 +2742,14 @@ function Globe({
           const pt = projection([st.dLon, st.dLat]);
           if (pt) {
             drawTrail(issHist, 'rgba(244,63,94,0)');
-            const pulse = 0.5 + 0.5*Math.sin(now/400);
-            octx.beginPath(); octx.arc(pt[0], pt[1], 11 + pulse*3, 0, Math.PI*2);
-            octx.strokeStyle = `rgba(244,63,94,${0.4 + pulse*0.3})`;
+            // Slow + gentle pulse. Old period was 400 ms (2.5 Hz strobe)
+            // with a 27 % radius swing and 75 % alpha swing — on an
+            // always-visible marker that read as constant flicker.
+            // Now 3.2 s period, 15 % radius / 30 % alpha swing — reads
+            // as a calm breathing ring.
+            const pulse = 0.5 + 0.5*Math.sin(now/1600);
+            octx.beginPath(); octx.arc(pt[0], pt[1], 11 + pulse*1.5, 0, Math.PI*2);
+            octx.strokeStyle = `rgba(244,63,94,${0.30 + pulse*0.15})`;
             octx.lineWidth = 1; octx.stroke();
             iconISS(octx, pt[0], pt[1], 16, '#f43f5e');
             octx.font = '500 10px Geist Mono, monospace';

@@ -66,23 +66,54 @@
       scheduleReconnect();
       return;
     }
+    let msgsSinceLog = 0;
+    let strikesSinceLog = 0;
+    let statsTimer = null;
     ws.onopen = () => {
       reconnectDelay = 3000;
       ws.send(JSON.stringify({ a: 111 }));
+      console.log(`[lightning] WS open → ${url} — subscribed {a:111}`);
+      // Periodic stats so the user can see in DevTools whether
+      // strikes are actually flowing through.
+      if (statsTimer) clearInterval(statsTimer);
+      statsTimer = setInterval(() => {
+        if (msgsSinceLog || strikesSinceLog) {
+          console.log(`[lightning] 30s: ${msgsSinceLog} msgs, ${strikesSinceLog} strikes`);
+        } else {
+          console.warn('[lightning] 30s: NO messages — Blitzortung WS silent');
+        }
+        msgsSinceLog = 0;
+        strikesSinceLog = 0;
+      }, 30000);
     };
     ws.onmessage = (ev) => {
+      msgsSinceLog++;
       const text = ev.data;
       if (!text) return;
       let j;
       try {
         j = (text[0] === '{' || text[0] === '[') ? JSON.parse(text) : JSON.parse(decode(text));
-      } catch { return; }
-      if (typeof j.lat !== 'number' || typeof j.lon !== 'number') return;
+      } catch (err) {
+        if (msgsSinceLog <= 2) console.warn('[lightning] parse fail, first bytes:', String(text).slice(0, 60));
+        return;
+      }
+      if (typeof j.lat !== 'number' || typeof j.lon !== 'number') {
+        if (msgsSinceLog <= 2) console.warn('[lightning] msg without lat/lon, keys:', Object.keys(j).slice(0, 8));
+        return;
+      }
+      strikesSinceLog++;
       STRIKES.push({ t: Date.now(), lat: +j.lat.toFixed(3), lon: +j.lon.toFixed(3), pol: j.pol || 0 });
       if (STRIKES.length > MAX) STRIKES.splice(0, STRIKES.length - MAX);
     };
-    ws.onerror = () => { /* onclose follows */ };
-    ws.onclose = () => { scheduleReconnect(); };
+    ws.onerror = (e) => {
+      console.warn('[lightning] WS error', e?.message || '(no detail)');
+    };
+    ws.onclose = (e) => {
+      if (statsTimer) clearInterval(statsTimer);
+      statsTimer = null;
+      console.warn(`[lightning] WS close code=${e.code} clean=${e.wasClean} reason=${e.reason || '(none)'}`);
+      scheduleReconnect();
+    };
   }
 
   function scheduleReconnect() {
