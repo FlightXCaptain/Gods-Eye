@@ -650,10 +650,9 @@ function Globe({
   const hoverRef = useRef(null);
   const hoverAppliedRef = useRef(null); // mirrors the last value pushed into React state so the tick-loop compare avoids tearing down the RAF on every mousemove
   const [hover, setHover] = useState(null);
-  const landRef = useRef(null);      // active land feature (swapped per zoom/motion by the draw loop)
-  const landLowRef  = useRef(null);  // 110m  ~100 KB  — globe-view + during auto-rotate
-  const landMidRef  = useRef(null);  // 50m   ~700 KB — regional zoom stationary
-  const landHighRef = useRef(null);  // 10m   ~3 MB   — close zoom stationary (shows Malta / Guam / Caymans)
+  const landRef = useRef(null);      // active land feature (swapped by zoom band)
+  const landLowRef  = useRef(null);  // 110m  ~100 KB  — globe / default view
+  const landMidRef  = useRef(null);  // 50m   ~700 KB  — close-in view
   const gridRef = useRef(null);
   // Motion trails. For each moving entity (keyed by stable ID) we keep the last
   // TRAIL_MAX lon/lat samples. Only pushed when the item has actually moved
@@ -950,16 +949,17 @@ function Globe({
         landRef.current = landLowRef.current;
         dirtyBase.current = true;
       } catch (e) { console.warn('land-110m fail', e); }
-      // Fire off 50m + 10m in parallel so the high-res tiers arrive as
+      // Fire off 50m in the background so the close-in tier arrives as
       // fast as the network allows without blocking the initial paint.
+      // (10m was tried previously but thousands of extra polygons per
+      // frame pushed base-redraw time over budget at the tier transition
+      // — interactions stalled and the camera snap-snapped on queued
+      // wheel events. The 50m tier is visually sufficient for all
+      // realistic zooms and renders cheaply.)
       d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-50m.json').then(t50 => {
         landMidRef.current = topojson.feature(t50, t50.objects.land);
         dirtyBase.current = true;
       }).catch(e => console.warn('land-50m fail', e));
-      d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/land-10m.json').then(t10 => {
-        landHighRef.current = topojson.feature(t10, t10.objects.land);
-        dirtyBase.current = true;
-      }).catch(e => console.warn('land-10m fail', e));
 
       // Countries — drawing uses topojson mesh (efficient dashed borders).
       try {
@@ -1728,41 +1728,26 @@ function Globe({
           bctx.restore();
         }
 
-        // Land — wireframe outline (the signature look). Tier is a
-        // *pure* function of zoomB. It used to also depend on
-        // `recentlyMoved` to drop to 110m for FPS during pan/zoom, but
-        // that produced a visible "reload" on every interaction — the
-        // map was constantly swapping between tiers, and at high zoom
-        // (where most 10m polys are off-screen anyway) the FPS argument
-        // didn't even apply. Pinning to zoomB means: once you've zoomed
-        // in far enough to warrant 10m, you keep seeing 10m, stable,
-        // across pan and further zoom within the same band.
+        // Land — wireframe outline (the signature look). Two tiers only,
+        // picked purely by zoomB (no motion dependency — swapping tiers
+        // mid-interaction read as a visible "reload" and was the source
+        // of the earlier flicker complaint):
+        //   • zoomB < 5   →  110m   (~100 KB, ~175 polys)   globe view
+        //   • zoomB ≥ 5   →  50m    (~550 KB, ~1400 polys)  close-in
         //
-        // Thresholds: finer tiers only kick in when you're zoomed in far
-        // enough for the extra detail to *read* on screen AND the render
-        // cost of more polygons is offset by the fact that most of them
-        // have clipped off-screen. At zoomB ≥ 15 the sphere is ~10× the
-        // viewport diagonal, so only ~1% of polygons actually project
-        // inside the visible area — that's when 10m stops costing FPS.
-        //   • zoomB < 3   →  110m   (~100 KB, ~175 polys)    globe view
-        //   • zoomB < 15  →  50m    (~550 KB, ~1400 polys)   regional
-        //   • zoomB ≥ 15  →  10m    (~3 MB,  ~4000 polys,    close-in,
-        //                            but mostly clipped)
+        // The 10m tier was tried previously. At the transition zoom, a
+        // big slice of the sphere was still on-screen, so ~2000 visible
+        // polygons per frame — combined with cables + country mesh +
+        // state lines + rivers + cities on the same dirty-frame path —
+        // pushed base redraw past 16 ms, saturating the event loop,
+        // queueing wheel events, and producing bursty camera snaps
+        // (\"random spinning\") plus unresponsive drag. Dropped it
+        // entirely; 50m reads well at every practical zoom.
         //
-        // Previous 10m threshold of 8 was still in a range where a big
-        // slice of the sphere was on-screen, so 10m drew ~2000 polys per
-        // frame plus overlays — pushing frames past 16 ms, stalling the
-        // event loop, and letting wheel events queue up. When they drained
-        // in a burst the camera snapped unpredictably ("random spinning")
-        // and further input felt unresponsive. 15 puts the transition
-        // comfortably inside the cheap regime.
-        //
-        // Tiers fall back gracefully while the higher-res files are
-        // still streaming.
+        // Tiers fall back gracefully while 50m is still streaming.
         const landTier =
-          zoomB < 3  ? (landLowRef.current  || landMidRef.current  || landHighRef.current) :
-          zoomB < 15 ? (landMidRef.current  || landLowRef.current  || landHighRef.current) :
-                       (landHighRef.current || landMidRef.current  || landLowRef.current);
+          zoomB < 5 ? (landLowRef.current || landMidRef.current)
+                    : (landMidRef.current || landLowRef.current);
         if (landTier) {
           landRef.current = landTier;
           bctx.beginPath(); path(landTier);
