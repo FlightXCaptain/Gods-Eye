@@ -323,6 +323,43 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <line x1="2" y1="19" x2="22" y2="19"/>
         </svg>
       );
+    case 'fab':
+      // Stylized chip: a square with four external pins per side, evoking
+      // a packaged IC. Readable at 12px inside the sub-panel.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="7" y="7" width="10" height="10" rx="1"/>
+          <line x1="4" y1="10" x2="7" y2="10"/><line x1="4" y1="14" x2="7" y2="14"/>
+          <line x1="17" y1="10" x2="20" y2="10"/><line x1="17" y1="14" x2="20" y2="14"/>
+          <line x1="10" y1="4" x2="10" y2="7"/><line x1="14" y1="4" x2="14" y2="7"/>
+          <line x1="10" y1="17" x2="10" y2="20"/><line x1="14" y1="17" x2="14" y2="20"/>
+        </svg>
+      );
+    case 'refinery':
+      // Stylized fractionation column — a tall rectangle with horizontal
+      // divisions and a stubby top vent. Distinct from `fab` (square)
+      // and `bolt` (lightning).
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="4" width="6" height="16"/>
+          <line x1="9" y1="8" x2="15" y2="8"/>
+          <line x1="9" y1="12" x2="15" y2="12"/>
+          <line x1="9" y1="16" x2="15" y2="16"/>
+          <path d="M12 4 L12 2"/>
+          <path d="M6 20 L18 20"/>
+        </svg>
+      );
+    case 'lng':
+      // Horizontal cryogenic LNG storage tank with a small dome — visually
+      // distinct from the vertical refinery column and the chip shape.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="4" y="10" width="14" height="8" rx="4"/>
+          <circle cx="18" cy="14" r="2"/>
+          <line x1="8" y1="10" x2="8" y2="18"/>
+          <line x1="12" y1="10" x2="12" y2="18"/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -332,10 +369,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                          newsFilters, setNewsFilters,
                          dcFilters, setDcFilters }) {
   const [open, setOpen] = useState(false);
-  // Expand/collapse for the Critical Infrastructure sub-panel. Independent
-  // of `open` (popover visibility) and of `layers.infrastructure` (master
-  // gate) — users can inspect sub-options before enabling the parent.
-  const [infraExpanded, setInfraExpanded] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
     ['ships','Ships',     'ship',    '#22d3ee'],
@@ -424,37 +457,28 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       <GlyphSVG kind={glyph} color={col} size={14}/>
                     </span>
                     <span className="text-sm flex-1">{label}</span>
-                    {k === 'infrastructure' && (
-                      <button
-                        type="button"
-                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setInfraExpanded(x => !x); }}
-                        className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-black/10 dark:hover:bg-white/10 transition-transform"
-                        style={{ transform: infraExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
-                        aria-label={infraExpanded ? 'Collapse infrastructure sub-layers' : 'Expand infrastructure sub-layers'}
-                      >
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M3 1 L7 5 L3 9 Z"/></svg>
-                      </button>
-                    )}
                     {k === 'quakes' && (
                       <span className="font-mono text-[10px] tabular-nums text-accent-500 shrink-0">
                         M{seismicMin.toFixed(1)}+
                       </span>
                     )}
                   </label>
-                  {/* Critical Infrastructure sub-panel. Rendered only when
-                      the chevron has been expanded, regardless of whether
-                      the parent checkbox is on (so users can inspect
-                      sub-options pre-enable). Visual groups separated by
-                      thin dividers; no group headers. When the Data centers
-                      sub-layer is enabled, its operator filter grid nests
-                      below it — preserved verbatim from the pre-refactor
-                      datacenters sub-filter UI. */}
-                  {k === 'infrastructure' && infraExpanded && (
+                  {/* Critical Infrastructure sub-panel. Rendered inline
+                      when the parent checkbox is on, matching the
+                      flights/ships sub-filter pattern. Visual groups
+                      separated by thin dividers; no group headers. When
+                      the Data centers sub-layer is enabled, its operator
+                      filter grid nests below it — preserved verbatim from
+                      the pre-refactor datacenters sub-filter UI. */}
+                  {k === 'infrastructure' && layers.infrastructure && (
                     <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
                       {/* Energy group */}
                       {[
+                        ['refineries', 'Oil refineries',    'refinery',  '#a16207'],
+                        ['lng',        'LNG terminals',     'lng',       '#93c5fd'],
                         ['plants',     'Power plants',      'bolt',      '#f59e0b'],
                         ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
+                        ['fabs',       'Semiconductor fabs','fab',       '#a78bfa'],
                       ].map(([sk, slabel, sglyph, scol]) => (
                         <label key={sk} className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
                           <input
@@ -950,6 +974,31 @@ function Dossier({ item, onClose }) {
             </a>
           )}
         </>}
+        {layer === 'fab' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Semiconductor fab · {item.operator}</div>
+          <KV k="Process" v={`${item.node_nm} nm`}/>
+          <KV k="Wafer" v={`${item.wafer_size_mm} mm`}/>
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.operator)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
+        {layer === 'refinery' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Oil refinery{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.capacity_bpd != null && <KV k="Capacity" v={`${Math.round(item.capacity_bpd).toLocaleString()} bpd`}/>}
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
+        </>}
+        {layer === 'lng' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">LNG {item.type || 'terminal'}{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.capacity_mtpa != null && <KV k="Capacity" v={`${item.capacity_mtpa} mtpa`}/>}
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name + ' LNG')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
         {layer === 'city' && <>
           <div className="text-lg">{item.name}</div>
           {item.country && <div className="text-sm opacity-70">{item.country}{item.admin1 ? ` · ${item.admin1}` : ''}</div>}
@@ -1372,7 +1421,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, infrastructure:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, infrastructure:false };
     // One-shot migration: users who had any infrastructure sub-layer enabled
     // before the parent toggle existed should have the parent auto-enabled
     // on first load of this version. Detect by: `infrastructure` key absent
@@ -1660,6 +1709,9 @@ function App() {
     fetchSubmarineCables().then(c => { if (alive) setData(d => ({ ...d, cables: c })); });
     fetchNuclearReactors().then(r => { if (alive) setData(d => ({ ...d, reactors: r })); });
     fetchPowerPlants().then(p => { if (alive) setData(d => ({ ...d, plants: p })); });
+    if (typeof window.fetchFabs === 'function') window.fetchFabs().then(f => { if (alive) setData(d => ({ ...d, fabs: f })); });
+    if (typeof window.fetchRefineries === 'function') window.fetchRefineries().then(x => { if (alive) setData(d => ({ ...d, refineries: x })); });
+    if (typeof window.fetchLngTerminals === 'function') window.fetchLngTerminals().then(x => { if (alive) setData(d => ({ ...d, lng: x })); });
     return () => { alive = false; clearInterval(id); };
   }, []);
 

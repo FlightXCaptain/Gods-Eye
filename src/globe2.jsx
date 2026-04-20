@@ -2188,6 +2188,82 @@ function Globe({
         octx.restore();
       }
 
+      // Semiconductor fabs (curated list, ~40 entries). Small enough
+      // we don't need LOD clustering — draw every fab in view as a
+      // small chip-like square with a thin outline. Uniform color
+      // `#a78bfa` (silicon purple).
+      if (layers.infrastructure && layers.fabs && Array.isArray(data.fabs) && data.fabs.length) {
+        octx.save();
+        octx.fillStyle = '#a78bfaee';
+        octx.strokeStyle = '#ede9fe';
+        octx.lineWidth = 0.8;
+        for (const f of data.fabs) {
+          if (!visibleOn(projection, f.lon, f.lat)) continue;
+          const pt = projection([f.lon, f.lat]); if (!pt) continue;
+          const s = 4.2;
+          octx.fillRect(pt[0] - s / 2, pt[1] - s / 2, s, s);
+          octx.strokeRect(pt[0] - s / 2, pt[1] - s / 2, s, s);
+          pushHit(pt[0], pt[1], 6, 'fab', f);
+        }
+        octx.restore();
+      }
+
+      // Oil refineries (OSM Overpass, ~600 entries globally). Rendered as
+      // small rust-brown tank silhouettes. LOD via simple cell-dedup at
+      // low zoom to keep the map readable in dense regions (Gulf Coast,
+      // Middle East, Rotterdam-Antwerp cluster).
+      if (layers.infrastructure && layers.refineries && Array.isArray(data.refineries) && data.refineries.length) {
+        const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.4 : 1.0;
+        const cell = new Map();
+        for (const r of data.refineries) {
+          if (!visibleOn(projection, r.lon, r.lat)) continue;
+          if (cellDeg === 0) { cell.set(r.id, r); continue; }
+          const key = Math.round(r.lon / cellDeg) + '|' + Math.round(r.lat / cellDeg);
+          if (!cell.has(key)) cell.set(key, r);
+        }
+        octx.save();
+        octx.fillStyle = '#a16207ee';
+        octx.strokeStyle = '#fde68a';
+        octx.lineWidth = 0.8;
+        for (const r of cell.values()) {
+          const pt = projection([r.lon, r.lat]); if (!pt) continue;
+          // Small circle with a subtle stroke — visually distinct from
+          // fabs (squares) and power plants (icon-in-circle).
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], 2.4, 0, Math.PI * 2);
+          octx.fill();
+          octx.stroke();
+          pushHit(pt[0], pt[1], 6, 'refinery', r);
+        }
+        octx.restore();
+      }
+
+      // LNG terminals (curated list, ~35 entries). Small dataset — no
+      // LOD clustering needed. Rendered as small ice-blue diamonds to
+      // visually distinguish from refinery circles and fab squares.
+      if (layers.infrastructure && layers.lng && Array.isArray(data.lng) && data.lng.length) {
+        octx.save();
+        octx.fillStyle = '#93c5fdee';
+        octx.strokeStyle = '#dbeafe';
+        octx.lineWidth = 0.8;
+        for (const t of data.lng) {
+          if (!visibleOn(projection, t.lon, t.lat)) continue;
+          const pt = projection([t.lon, t.lat]); if (!pt) continue;
+          // Diamond (45° rotated square).
+          const s = 3.2;
+          octx.beginPath();
+          octx.moveTo(pt[0], pt[1] - s);
+          octx.lineTo(pt[0] + s, pt[1]);
+          octx.lineTo(pt[0], pt[1] + s);
+          octx.lineTo(pt[0] - s, pt[1]);
+          octx.closePath();
+          octx.fill();
+          octx.stroke();
+          pushHit(pt[0], pt[1], 6, 'lng', t);
+        }
+        octx.restore();
+      }
+
       // GDELT news hotspots. Each event is a single geocoded news
       // article cluster, colored by CAMEO QuadClass (1=verbal coop
       // green, 2=material coop sky, 3=verbal conflict amber, 4=material
@@ -3091,6 +3167,15 @@ function Globe({
           )}
           {hover._layer === 'plant' && (
             <span>{hover.name}{hover.capacity ? ` · ${Math.round(hover.capacity)} MW` : ''}{hover.fuel ? ` · ${hover.fuel.toLowerCase()}` : ''}</span>
+          )}
+          {hover._layer === 'fab' && (
+            <span>{hover.operator} · {hover.name}{hover.node_nm ? ` · ${hover.node_nm} nm` : ''}</span>
+          )}
+          {hover._layer === 'refinery' && (
+            <span>{hover.name}{hover.operator ? ` · ${hover.operator}` : ''}{hover.capacity_bpd ? ` · ${Math.round(hover.capacity_bpd).toLocaleString()} bpd` : ''}</span>
+          )}
+          {hover._layer === 'lng' && (
+            <span>{hover.name}{hover.type ? ` · ${hover.type}` : ''}{hover.capacity_mtpa ? ` · ${hover.capacity_mtpa} mtpa` : ''}</span>
           )}
           {hover._layer === 'news' && (
             <span>{hover.place || 'Unlocated'} · {hover.mentions || 1}× mentions · tone {hover.tone?.toFixed?.(1) || 0}</span>
