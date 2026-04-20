@@ -876,23 +876,33 @@ const LAYER_FOR_TYPE = {
   // no layer toggle controls them, so nothing to enable.
 };
 
-// Lock-on zoom presets per layer. Used by both the double-click focus
-// handler (handleFocusItem) and search-select (targets), so the same
-// mental model applies to every lock-on entry point. Tracked targets
-// (flights/ships/sats/ISS) can safely go high because the camera stays
-// centred on them; static POIs pull close for readability. Country stays
-// conservative because it clips if over-zoomed.
+// Lock-on zoom presets per layer. Used by every entry point that locks
+// onto a target: double-click on a map marker, search-pick, news-feed
+// pick, ticker pick. Values are multipliers against the viewport-fit
+// base scale (see globe2.jsx: `s = min(w,h) / 2.1`); the zoom-toward
+// clamp caps the scene at ~50× the viewport-short-edge, so there's a
+// lot of headroom above these numbers.
+//
+// Tracked targets (flights/ships/sats/ISS) can safely go very high
+// because the camera keeps them centred as they move. Static POIs
+// pull equally close for readability. Country stays conservative
+// because most countries are wider than a deep frame and would clip.
+//
+// News + infrastructure go deep — the ticker is the primary discovery
+// path for conflict events, and GDELT's ActionGeo is city-level, so
+// users expect to land *in* the neighbourhood, not vaguely over a
+// continent. Cyclone stays modest since the forecast cone is wide and
+// a tight zoom would hide it.
 const LOCK_ON_ZOOM = {
-  iss: 8, sat: 8, country: 4,
-  event: 10, lake: 8, quake: 12,
-  city: 14, flight: 26, ship: 30,
-  // Static infrastructure / conflict news — all city-level point
-  // features with ~city precision so zoom 10 gives a useful close-up.
-  news: 10, cyclone: 4, reactor: 10, plant: 10, datacenter: 10,
-  fab: 10, refinery: 10, lng: 10, gasproc: 10, smelter: 10,
-  mine: 10, cement: 10, dam: 10, port: 10,
+  iss: 16, sat: 16, country: 8,
+  event: 22, lake: 16, quake: 24,
+  city: 28, flight: 44, ship: 45,
+  news: 28, cyclone: 10,
+  reactor: 22, plant: 22, datacenter: 22, fab: 22, refinery: 22,
+  lng: 22, gasproc: 22, smelter: 22, mine: 22, cement: 22,
+  dam: 22, port: 22,
 };
-const lockZoom = (type) => LOCK_ON_ZOOM[type] || 8;
+const lockZoom = (type) => LOCK_ON_ZOOM[type] || 16;
 
 // CAMEO root-code metadata used by both the legend accent colour and the
 // category filter inside NewsPopover. Kept here (not inside the popover)
@@ -1262,7 +1272,7 @@ function Dossier({ item, onClose }) {
               Source · ADSBx {item.source === 'adsbx-ocean' ? '(ocean)' : ''}
             </div>
           )}
-          <FlightRouteInfo icao24={item.id}/>
+          <FlightRouteInfo callsign={item.callsign}/>
         </>}
         {layer === 'ship' && <>
           <div className="text-lg">{item.name || `MMSI ${item.mmsi}`}</div>
@@ -1538,26 +1548,27 @@ function KV({ k, v }) {
   );
 }
 
-// Async-fetches the most recent OpenSky-logged flight for an aircraft and
-// renders the departure / arrival airports. Returns null while loading or
-// when no flight record exists (aircraft new to the network, private
-// operation, or route hasn't been logged). See api/flight-route.js for
-// the server side, which resolves ICAO airport codes to coordinates via
-// OurAirports.
-function FlightRouteInfo({ icao24 }) {
+// Async-fetches the scheduled origin+destination for a callsign and
+// renders them in the dossier. Returns null while loading or when no
+// route record exists (callsign not in ADSBdb — typical for ferry /
+// charter / private / military). See api/flight-route.js for the
+// server side which queries ADSBdb.
+function FlightRouteInfo({ callsign }) {
   const [route, setRoute] = useState(null);
   useEffect(() => {
-    if (!icao24 || typeof window.getFlightRoute !== 'function') return;
+    if (!callsign || typeof window.getFlightRoute !== 'function') return;
     let cancel = false;
-    window.getFlightRoute(icao24).then((r) => { if (!cancel) setRoute(r); }).catch(() => {});
+    window.getFlightRoute(callsign).then((r) => { if (!cancel) setRoute(r); }).catch(() => {});
     return () => { cancel = true; };
-  }, [icao24]);
+  }, [callsign]);
   if (!route || !route.dep || !route.arr) return null;
-  const depLabel = `${route.dep.iata || route.dep.icao} · ${route.dep.name}`;
-  const arrLabel = `${route.arr.iata || route.arr.icao} · ${route.arr.name}`;
-  // Great-circle distance between the two airports. Used for a rough
-  // route-length readout — the actual flight path deviates slightly due
-  // to wind routing / airways, but this is the right order of magnitude.
+  const depCode = route.dep.iata || route.dep.icao;
+  const arrCode = route.arr.iata || route.arr.icao;
+  const depLabel = `${depCode} · ${route.dep.name}`;
+  const arrLabel = `${arrCode} · ${route.arr.name}`;
+  // Great-circle distance between the two airports. Route-length readout
+  // — the actual flight path deviates slightly due to wind routing /
+  // airways, but this is the right order of magnitude.
   const toRad = (d) => d * Math.PI / 180;
   const lat1 = toRad(route.dep.lat), lat2 = toRad(route.arr.lat);
   const dLat = lat2 - lat1;
@@ -1566,7 +1577,7 @@ function FlightRouteInfo({ icao24 }) {
   const km = Math.round(2 * 6371 * Math.asin(Math.sqrt(a)));
   return (
     <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1">
-      <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Route · OpenSky</div>
+      <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Route · ADSBdb</div>
       <KV k="From" v={depLabel}/>
       <KV k="To" v={arrLabel}/>
       <KV k="Distance" v={`~${km.toLocaleString()} km`}/>
@@ -2095,6 +2106,11 @@ function App() {
       zoom: lockZoom(layer),
       trackId: trackKey,
       trackLayer: layer,
+      // Carry the callsign along for the route-line lookup in globe2's
+      // focus effect. ADSBdb's route API is keyed on callsign so we
+      // need it there; rather than re-deriving from window.__flights
+      // on every focus change we just stash it once at click time.
+      callsign: layer === 'flight' ? (hit.callsign || null) : null,
     });
     setPicked(hit);
   }, []);
