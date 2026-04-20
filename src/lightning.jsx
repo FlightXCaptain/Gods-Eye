@@ -16,6 +16,15 @@
      2. Send {"a": 111} to subscribe to the global strike feed
      3. Receive TEXT frames. Some servers send plain JSON; others use
         an LZW-compressed form. Decoder below handles both.
+
+   Classifying LZW vs raw JSON: an earlier version peeked at the first
+   character and assumed raw JSON if it was '{'. That's broken — LZW
+   always preserves the first literal byte of the decoded output, so
+   every compressed Blitzortung strike *also* starts with '{' and the
+   heuristic never tripped the decode path. Dictionary references are
+   emitted as code units ≥ 256, and valid JSON can't legitimately
+   contain those above U+00FF in unescaped form, so scanning for any
+   charCode ≥ 256 is a deterministic tell.
 */
 
 (function () {
@@ -89,12 +98,25 @@
     ws.onmessage = (ev) => {
       msgsSinceLog++;
       const text = ev.data;
-      if (!text) return;
+      if (!text || typeof text !== 'string') return;
+      // LZW classifier: any codepoint ≥ 256 is a dictionary reference,
+      // which can't appear in raw JSON. Scan up to a short window — for
+      // compressed frames we hit a high byte in the first dozen chars,
+      // and for raw-JSON frames (all ASCII) we bail at end of string.
+      let isLZW = false;
+      const scanLen = Math.min(text.length, 64);
+      for (let i = 0; i < scanLen; i++) {
+        if (text.charCodeAt(i) >= 256) { isLZW = true; break; }
+      }
+      const raw = isLZW ? decode(text) : text;
       let j;
       try {
-        j = (text[0] === '{' || text[0] === '[') ? JSON.parse(text) : JSON.parse(decode(text));
+        j = JSON.parse(raw);
       } catch (err) {
-        if (msgsSinceLog <= 2) console.warn('[lightning] parse fail, first bytes:', String(text).slice(0, 60));
+        if (msgsSinceLog <= 2) {
+          console.warn('[lightning] parse fail, lzw=' + isLZW + ', first bytes:',
+                       String(raw).slice(0, 60));
+        }
         return;
       }
       if (typeof j.lat !== 'number' || typeof j.lon !== 'number') {
