@@ -323,7 +323,12 @@ const CAMEO_ROOT_NAMES = {
 
 function newsSummary(e) {
   const root = CAMEO_ROOT_NAMES[e.rootCode] || 'Event';
-  const place = (e.place || '').replace(/\s*\(general\)/ig, '').trim();
+  // Tidy: drop "(general)" and collapse middle admin divisions so "Kyiv,
+  // Kyyiv, Misto, Ukraine" becomes "Kyiv, Ukraine" on the hover label.
+  const cleaned = (e.place || '').replace(/\s*\(general\)/ig, '').trim();
+  const parts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 2 && parts[0] === parts[parts.length - 1]) parts.pop();
+  const place = parts.length > 2 ? `${parts[0]}, ${parts[parts.length - 1]}` : parts.join(', ');
   return place ? `${root} · ${place}` : root;
 }
 

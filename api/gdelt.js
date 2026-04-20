@@ -168,6 +168,23 @@ function titleCase(s) {
   return s.toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase());
 }
 
+// Tidy up GDELT's place labels:
+//   "Israel (general), Israel"       → "Israel"           (drop "(general)" + dedupe)
+//   "Bangkok, Thailand"              → "Bangkok, Thailand" (already compact)
+//   "Kyiv, Kyyiv, Misto, Ukraine"    → "Kyiv, Ukraine"    (drop middle admin divs)
+function shortenPlace(place) {
+  if (!place) return '';
+  const cleaned = place.replace(/\s*\(general\)/ig, '').trim();
+  const parts = cleaned.split(',').map(p => p.trim()).filter(Boolean);
+  // Drop trailing part if it duplicates the first ("Israel, Israel").
+  if (parts.length >= 2 && parts[0] === parts[parts.length - 1]) {
+    parts.pop();
+  }
+  // Keep city + country; drop middle admin divisions (state / region).
+  if (parts.length > 2) return `${parts[0]}, ${parts[parts.length - 1]}`;
+  return parts.join(', ');
+}
+
 // Compact one-liner summary usable as a hover label or dossier heading.
 // Builds from the fields we already have — no external lookups needed.
 // Shape heuristics:
@@ -180,9 +197,7 @@ function buildSummary(rec) {
   const a1 = titleCase(rec.actor1Name);
   const a2 = titleCase(rec.actor2Name);
   const ev = rec.eventName || rec.rootName || 'Event';
-  const place = rec.place || '';
-  // Trim "Country (general), Country" duplication GDELT likes to emit.
-  const shortPlace = place.replace(/\s*\(general\)/ig, '').replace(/,\s*[^,]+$/, (m) => place.split(',').length > 2 ? m : '');
+  const shortPlace = shortenPlace(rec.place);
   if (a1 && a2 && a1 !== a2) {
     return `${a1} → ${a2} · ${ev}${shortPlace ? ` · ${shortPlace}` : ''}`;
   }

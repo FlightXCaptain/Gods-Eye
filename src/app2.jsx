@@ -1510,15 +1510,15 @@ function App() {
   const [newsFilters, setNewsFilters] = useState(() => {
     try {
       const raw = JSON.parse(localStorage.getItem('ge-news-filters')) || {};
-      // Migrate the previous 4-way QuadClass schema to the new 2-way
-      // split. Anyone who had quadConflict=true implicitly wanted
-      // conflict; everyone else gets the new default.
+      // Old schema used quadCoop / quadMat / quadVerbal / quadConflict. The
+      // previous defaults had all four ON, so almost every stored object
+      // carries them whether the user actually customised the filter or
+      // not — we can't tell apart "accepted defaults" from "deliberately
+      // picked". Safer to drop the stale keys and let the new defaults
+      // apply, while preserving tone picks (tone semantics didn't change).
       if (raw.quadConflict !== undefined || raw.quadVerbal !== undefined ||
           raw.quadCoop !== undefined || raw.quadMat !== undefined) {
-        const conflict = (raw.quadConflict !== false) || (raw.quadVerbal !== false);
-        const nonConflict = (raw.quadCoop === true) || (raw.quadMat === true);
         return {
-          conflict, nonConflict,
           tonePos: raw.tonePos !== false,
           toneNeu: raw.toneNeu !== false,
           toneNeg: raw.toneNeg !== false,
