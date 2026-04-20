@@ -498,11 +498,11 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
       <IconBtn onClick={()=>setOpen(o=>!o)} active={open} title="Layers">
         <Icon name="layers" />
       </IconBtn>
+      {/* Popover wrapper: mobile viewport-anchored sheet (fixed +
+          inset-x-3) so it doesn't clip off-screen when the Layers
+          button sits in the middle of the action cluster; desktop
+          keeps the original button-relative dropdown. */}
       {open && (
-          {/* Mobile: viewport-anchored sheet so the popover doesn't clip
-              past the left edge when the Layers button sits in the
-              middle of the action cluster. Desktop: original button-
-              relative dropdown. */}
           <div className="fixed sm:absolute z-50 inset-x-3 sm:inset-x-auto top-[60px] sm:top-12 sm:right-0 sm:w-60 max-h-[70vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between mb-2 shrink-0">
               <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Layers</div>
@@ -1041,11 +1041,11 @@ function NewsPopover({ news, onPick }) {
       <IconBtn onClick={()=>setOpen(o=>!o)} active={open} title="Conflict news feed">
         <Icon name="newspaper" />
       </IconBtn>
+      {/* Popover wrapper: mobile viewport-anchored sheet (fixed +
+          inset-x-3) so the popover doesn't clip past the left edge
+          when the News button sits in the middle of a 5-button action
+          cluster; desktop keeps the original button-relative dropdown. */}
       {open && (
-        {/* Mobile: position against the viewport (fixed + inset) so the
-            popover doesn't clip past the left edge when the News button
-            sits in the middle of a 5-button action cluster. Desktop:
-            original button-relative dropdown. */}
         <div className="fixed sm:absolute z-50 inset-x-3 sm:inset-x-auto top-[60px] sm:top-12 sm:right-0 sm:w-[380px] max-h-[75vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
           {/* Header: title + live count */}
           <div className="flex items-center justify-between mb-2 shrink-0">
