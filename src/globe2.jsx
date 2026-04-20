@@ -2188,6 +2188,26 @@ function Globe({
         octx.restore();
       }
 
+      // Semiconductor fabs (curated list, ~40 entries). Small enough
+      // we don't need LOD clustering — draw every fab in view as a
+      // small chip-like square with a thin outline. Uniform color
+      // `#a78bfa` (silicon purple).
+      if (layers.infrastructure && layers.fabs && Array.isArray(data.fabs) && data.fabs.length) {
+        octx.save();
+        octx.fillStyle = '#a78bfaee';
+        octx.strokeStyle = '#ede9fe';
+        octx.lineWidth = 0.8;
+        for (const f of data.fabs) {
+          if (!visibleOn(projection, f.lon, f.lat)) continue;
+          const pt = projection([f.lon, f.lat]); if (!pt) continue;
+          const s = 4.2;
+          octx.fillRect(pt[0] - s / 2, pt[1] - s / 2, s, s);
+          octx.strokeRect(pt[0] - s / 2, pt[1] - s / 2, s, s);
+          pushHit(pt[0], pt[1], 6, 'fab', f);
+        }
+        octx.restore();
+      }
+
       // GDELT news hotspots. Each event is a single geocoded news
       // article cluster, colored by CAMEO QuadClass (1=verbal coop
       // green, 2=material coop sky, 3=verbal conflict amber, 4=material
@@ -3091,6 +3111,9 @@ function Globe({
           )}
           {hover._layer === 'plant' && (
             <span>{hover.name}{hover.capacity ? ` · ${Math.round(hover.capacity)} MW` : ''}{hover.fuel ? ` · ${hover.fuel.toLowerCase()}` : ''}</span>
+          )}
+          {hover._layer === 'fab' && (
+            <span>{hover.operator} · {hover.name}{hover.node_nm ? ` · ${hover.node_nm} nm` : ''}</span>
           )}
           {hover._layer === 'news' && (
             <span>{hover.place || 'Unlocated'} · {hover.mentions || 1}× mentions · tone {hover.tone?.toFixed?.(1) || 0}</span>
