@@ -1323,21 +1323,21 @@ function Globe({
 
       projection.rotate(rotRef.current).scale(scaleRef.current);
 
-      // Draw base (only when dirty AND enough time has passed) — the base
-      // layer re-projects country polygons, states, rivers, lakes, and
-      // cities; on mobile a 60-120 Hz touchmove stream used to redraw all
-      // of that on every frame, making drag/pinch feel janky.
+      // Draw base on every dirty frame.
       //
-      // Uniform ~45 fps (22 ms) throttle. An earlier attempt to drop
-      // auto-rotate to 15 fps caused a visible flicker: basemap
-      // coastlines would snap forward in discrete 0.26° steps while the
-      // overlay (ships / flights / particles) continued advancing at
-      // 60 fps — the rotational mismatch between layers reads as a
-      // strobe. With the basemap LOD (110m during motion) the uniform
-      // 22 ms cadence is already cheap enough and keeps everything in
-      // frame-accurate sync.
-      const BASE_REDRAW_MIN_MS = 22;
-      if (dirtyBase.current && (tickNow - lastBaseRedrawMsRef.current) >= BASE_REDRAW_MIN_MS) {
+      // History: we previously throttled this (22 ms uniform; or 66 ms
+      // during auto-rotate). Both throttles produced visible flicker —
+      // the basemap's coastlines and country borders sat at one
+      // rotation while overlay layers (ships, flights, particles)
+      // continued advancing at 60 fps. The rotational mismatch reads
+      // as a strobe across the globe even at 1-2 frames of lag.
+      //
+      // The basemap LOD (#61, #64) already drops to 110m during any
+      // view motion (<200 polygons, ~100 KB), so per-frame redraws
+      // are cheap enough to remove the throttle entirely. Keeping
+      // basemap and overlays frame-locked is the only way to
+      // eliminate the strobe.
+      if (dirtyBase.current) {
         lastBaseRedrawMsRef.current = tickNow;
         bctx.clearRect(0,0,width,height);
         const path = d3.geoPath(projection, bctx);
