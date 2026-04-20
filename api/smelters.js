@@ -57,7 +57,14 @@ const NON_OIL_NAME_RE = new RegExp(
     'lead|zinc|nickel|' +
     'salt|' +
     'cement|ciment|cemento|zement|' +
-    'polymer|polimer|polymere|polypropylene|polyethylene' +
+    'polymer|polimer|polymere|polypropylene|polyethylene|' +
+    // Agricultural / food-oil mills (palm, olive, etc.) — these DO
+    // refine a commodity (crude palm oil → refined palm oil) so they
+    // belong in Smelters & mills rather than dropped entirely.
+    'palm\\s+oil|palm[-_\\s]?kernel|palm\\s+mill|' +
+    'olive\\s+oil|vegetable\\s+oil|cooking\\s+oil|' +
+    'coconut\\s+oil|soybean\\s+oil|canola\\s+oil|rapeseed\\s+oil|' +
+    'sunflower\\s+oil|peanut\\s+oil|mustard\\s+oil|castor\\s+oil|copra' +
   ')\\b',
   'i'
 );
@@ -87,6 +94,9 @@ function inferKind(tags, nName) {
   if (/paper|pulp|sawmill|kraft/i.test(nName)) return 'paper';
   if (/salt/i.test(nName)) return 'salt';
   if (/polymer|polimer|polymere|polypropylene|polyethylene/i.test(nName)) return 'polymer';
+  if (/palm\s+oil|palm[-_\s]?kernel|palm\s+mill|copra/i.test(nName)) return 'palm oil';
+  if (/olive\s+oil/i.test(nName)) return 'olive oil';
+  if (/vegetable\s+oil|cooking\s+oil|coconut\s+oil|soybean\s+oil|canola\s+oil|rapeseed\s+oil|sunflower\s+oil|peanut\s+oil|mustard\s+oil|castor\s+oil/i.test(nName)) return 'vegetable oil';
   return 'other';
 }
 
