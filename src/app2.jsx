@@ -426,14 +426,13 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       </span>
                     )}
                   </label>
-                  {/* Critical Infrastructure sub-panel. Rendered only when
-                      the chevron has been expanded, regardless of whether
-                      the parent checkbox is on (so users can inspect
-                      sub-options pre-enable). Visual groups separated by
-                      thin dividers; no group headers. When the Data centers
-                      sub-layer is enabled, its operator filter grid nests
-                      below it — preserved verbatim from the pre-refactor
-                      datacenters sub-filter UI. */}
+                  {/* Critical Infrastructure sub-panel. Rendered inline
+                      when the parent checkbox is on, matching the
+                      flights/ships sub-filter pattern. Visual groups
+                      separated by thin dividers; no group headers. When
+                      the Data centers sub-layer is enabled, its operator
+                      filter grid nests below it — preserved verbatim from
+                      the pre-refactor datacenters sub-filter UI. */}
                   {k === 'infrastructure' && layers.infrastructure && (
                     <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
                       {/* Energy group */}
