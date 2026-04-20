@@ -398,6 +398,38 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <line x1="3" y1="19" x2="21" y2="19" opacity="0.5"/>
         </svg>
       );
+    case 'smelter':
+      // Factory with a tall chimney + wisp of smoke. Reads as "heavy
+      // industrial / smelter" rather than generic building.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="13" width="11" height="6"/>
+          <rect x="15" y="9" width="5" height="10"/>
+          <path d="M17.5 9 Q19 6, 17.5 4" opacity="0.6"/>
+          <line x1="3" y1="19" x2="21" y2="19" opacity="0.5"/>
+        </svg>
+      );
+    case 'mine':
+      // Inverted triangle with a horizontal rim — reads as "open pit"
+      // or mine shaft opening. Distinct from the city star and the
+      // dam's trapezoid.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6 L21 6 L12 20 Z"/>
+          <line x1="3" y1="6" x2="21" y2="6" opacity="0.8"/>
+          <path d="M7 6 L12 14 L17 6" opacity="0.4"/>
+        </svg>
+      );
+    case 'cement':
+      // Tall cylindrical silo with conical top. Common cement-plant
+      // silhouette.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 8 Q12 4, 16 8 L16 19 L8 19 Z"/>
+          <line x1="8" y1="12" x2="16" y2="12" opacity="0.5"/>
+          <line x1="3" y1="19" x2="21" y2="19" opacity="0.5"/>
+        </svg>
+      );
     case 'pipeline':
       // Two segments with a valve-joint in the middle, plus endcaps —
       // reads as "pipe" rather than generic "line".
@@ -530,7 +562,6 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                         ['pipelines',  'Oil / gas pipelines','pipeline', '#d97706'],
                         ['plants',     'Power plants',      'bolt',      '#f59e0b'],
                         ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
-                        ['fabs',       'Semiconductor fabs','fab',       '#a78bfa'],
                       ].map(([sk, slabel, sglyph, scol]) => (
                         <label key={sk} className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
                           <input
@@ -619,7 +650,29 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                           </div>
                         </div>
                       )}
-                      {/* Divider between Connectivity and Water */}
+                      {/* Divider between Connectivity and Industrial */}
+                      <div className="border-t border-black/10 dark:border-white/10 my-1"/>
+                      {/* Industrial group — heavy industry, extractive, fabs */}
+                      {[
+                        ['fabs',     'Semiconductor fabs','fab',     '#a78bfa'],
+                        ['smelters', 'Smelters & mills',  'smelter', '#94a3b8'],
+                        ['cement',   'Cement plants',     'cement',  '#d4d4d8'],
+                        ['mines',    'Mines',             'mine',    '#78716c'],
+                      ].map(([sk, slabel, sglyph, scol]) => (
+                        <label key={sk} className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!layers[sk]}
+                            onChange={e => setLayers(x => ({ ...x, [sk]: e.target.checked }))}
+                            className="accent-accent-500 scale-90"
+                          />
+                          <span className="shrink-0 w-3 h-3 flex items-center justify-center" style={{ color: scol }}>
+                            <GlyphSVG kind={sglyph} color={scol} size={12}/>
+                          </span>
+                          <span className="opacity-80">{slabel}</span>
+                        </label>
+                      ))}
+                      {/* Divider between Industrial and Water */}
                       <div className="border-t border-black/10 dark:border-white/10 my-1"/>
                       {/* Water group */}
                       <label className="flex items-center gap-2 py-0.5 text-[11px] cursor-pointer">
@@ -1295,6 +1348,28 @@ function Dossier({ item, onClose }) {
           <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
           <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
         </>}
+        {layer === 'smelter' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">{(item.kind || 'Smelter').replace(/^[a-z]/, c => c.toUpperCase())} refinery / mill{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
+        </>}
+        {layer === 'mine' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Mine{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.resource && <KV k="Resource" v={item.resource}/>}
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
+        </>}
+        {layer === 'cement' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Cement plant{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
+        </>}
         {layer === 'dam' && <>
           <div className="text-lg">{item.name}</div>
           <div className="text-sm opacity-70">Dam{item.dam_type ? ` · ${item.dam_type.replace(/_/g, ' ')}` : ''}</div>
@@ -1741,7 +1816,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, gasproc:false, dams:false, ports:false, pipelines:false, infrastructure:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, gasproc:false, smelters:false, mines:false, cement:false, dams:false, ports:false, pipelines:false, infrastructure:false };
     // One-shot migration: users who had any infrastructure sub-layer enabled
     // before the parent toggle existed should have the parent auto-enabled
     // on first load of this version. Detect by: `infrastructure` key absent
@@ -2067,6 +2142,9 @@ function App() {
     if (typeof window.fetchRefineries === 'function') window.fetchRefineries().then(x => { if (alive) setData(d => ({ ...d, refineries: x })); });
     if (typeof window.fetchLngTerminals === 'function') window.fetchLngTerminals().then(x => { if (alive) setData(d => ({ ...d, lng: x })); });
     if (typeof window.fetchGasProcessing === 'function') window.fetchGasProcessing().then(x => { if (alive) setData(d => ({ ...d, gasproc: x })); });
+    if (typeof window.fetchSmelters === 'function') window.fetchSmelters().then(x => { if (alive) setData(d => ({ ...d, smelters: x })); });
+    if (typeof window.fetchMines === 'function') window.fetchMines().then(x => { if (alive) setData(d => ({ ...d, mines: x })); });
+    if (typeof window.fetchCementPlants === 'function') window.fetchCementPlants().then(x => { if (alive) setData(d => ({ ...d, cement: x })); });
     if (typeof window.fetchDams === 'function') window.fetchDams().then(x => { if (alive) setData(d => ({ ...d, dams: x })); });
     if (typeof window.fetchPortsMajor === 'function') window.fetchPortsMajor().then(x => { if (alive) setData(d => ({ ...d, ports: x })); });
     if (typeof window.fetchPipelines === 'function') window.fetchPipelines().then(x => { if (alive) setData(d => ({ ...d, pipelines: x })); });
