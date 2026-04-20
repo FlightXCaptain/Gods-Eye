@@ -2208,6 +2208,36 @@ function Globe({
         octx.restore();
       }
 
+      // Oil refineries (OSM Overpass, ~600 entries globally). Rendered as
+      // small rust-brown tank silhouettes. LOD via simple cell-dedup at
+      // low zoom to keep the map readable in dense regions (Gulf Coast,
+      // Middle East, Rotterdam-Antwerp cluster).
+      if (layers.infrastructure && layers.refineries && Array.isArray(data.refineries) && data.refineries.length) {
+        const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.4 : 1.0;
+        const cell = new Map();
+        for (const r of data.refineries) {
+          if (!visibleOn(projection, r.lon, r.lat)) continue;
+          if (cellDeg === 0) { cell.set(r.id, r); continue; }
+          const key = Math.round(r.lon / cellDeg) + '|' + Math.round(r.lat / cellDeg);
+          if (!cell.has(key)) cell.set(key, r);
+        }
+        octx.save();
+        octx.fillStyle = '#a16207ee';
+        octx.strokeStyle = '#fde68a';
+        octx.lineWidth = 0.8;
+        for (const r of cell.values()) {
+          const pt = projection([r.lon, r.lat]); if (!pt) continue;
+          // Small circle with a subtle stroke — visually distinct from
+          // fabs (squares) and power plants (icon-in-circle).
+          octx.beginPath();
+          octx.arc(pt[0], pt[1], 2.4, 0, Math.PI * 2);
+          octx.fill();
+          octx.stroke();
+          pushHit(pt[0], pt[1], 6, 'refinery', r);
+        }
+        octx.restore();
+      }
+
       // GDELT news hotspots. Each event is a single geocoded news
       // article cluster, colored by CAMEO QuadClass (1=verbal coop
       // green, 2=material coop sky, 3=verbal conflict amber, 4=material
@@ -3114,6 +3144,9 @@ function Globe({
           )}
           {hover._layer === 'fab' && (
             <span>{hover.operator} · {hover.name}{hover.node_nm ? ` · ${hover.node_nm} nm` : ''}</span>
+          )}
+          {hover._layer === 'refinery' && (
+            <span>{hover.name}{hover.operator ? ` · ${hover.operator}` : ''}{hover.capacity_bpd ? ` · ${Math.round(hover.capacity_bpd).toLocaleString()} bpd` : ''}</span>
           )}
           {hover._layer === 'news' && (
             <span>{hover.place || 'Unlocated'} · {hover.mentions || 1}× mentions · tone {hover.tone?.toFixed?.(1) || 0}</span>
