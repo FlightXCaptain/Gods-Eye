@@ -349,6 +349,17 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <path d="M6 20 L18 20"/>
         </svg>
       );
+    case 'lng':
+      // Horizontal cryogenic LNG storage tank with a small dome — visually
+      // distinct from the vertical refinery column and the chip shape.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="4" y="10" width="14" height="8" rx="4"/>
+          <circle cx="18" cy="14" r="2"/>
+          <line x1="8" y1="10" x2="8" y2="18"/>
+          <line x1="12" y1="10" x2="12" y2="18"/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -464,6 +475,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       {/* Energy group */}
                       {[
                         ['refineries', 'Oil refineries',    'refinery',  '#a16207'],
+                        ['lng',        'LNG terminals',     'lng',       '#93c5fd'],
                         ['plants',     'Power plants',      'bolt',      '#f59e0b'],
                         ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
                         ['fabs',       'Semiconductor fabs','fab',       '#a78bfa'],
@@ -979,6 +991,14 @@ function Dossier({ item, onClose }) {
           <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
           <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
         </>}
+        {layer === 'lng' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">LNG {item.type || 'terminal'}{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.capacity_mtpa != null && <KV k="Capacity" v={`${item.capacity_mtpa} mtpa`}/>}
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.name + ' LNG')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
+        </>}
         {layer === 'city' && <>
           <div className="text-lg">{item.name}</div>
           {item.country && <div className="text-sm opacity-70">{item.country}{item.admin1 ? ` · ${item.admin1}` : ''}</div>}
@@ -1401,7 +1421,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, infrastructure:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, infrastructure:false };
     // One-shot migration: users who had any infrastructure sub-layer enabled
     // before the parent toggle existed should have the parent auto-enabled
     // on first load of this version. Detect by: `infrastructure` key absent
@@ -1691,6 +1711,7 @@ function App() {
     fetchPowerPlants().then(p => { if (alive) setData(d => ({ ...d, plants: p })); });
     if (typeof window.fetchFabs === 'function') window.fetchFabs().then(f => { if (alive) setData(d => ({ ...d, fabs: f })); });
     if (typeof window.fetchRefineries === 'function') window.fetchRefineries().then(x => { if (alive) setData(d => ({ ...d, refineries: x })); });
+    if (typeof window.fetchLngTerminals === 'function') window.fetchLngTerminals().then(x => { if (alive) setData(d => ({ ...d, lng: x })); });
     return () => { alive = false; clearInterval(id); };
   }, []);
 
