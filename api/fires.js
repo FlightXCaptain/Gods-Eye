@@ -27,10 +27,16 @@ let cache = null;
 
 // VIIRS has the best resolution (375 m) and most pixels per day. SNPP has
 // been up longest and is most reliable; NOAA-20 has better morning
-// coverage. For world/24h coverage, SNPP alone gives 15-40k pixels — plenty
+// coverage. For world/2-day coverage, SNPP gives ~30-50k pixels — plenty
 // without hammering the NASA quota.
+//
+// DAYS = 2 (not 1), because FIRMS's "world/1" means strictly "today UTC".
+// NRT processing has ~3-hour latency, so for the first chunk of every
+// new UTC day the response is empty — looks like the layer broke. With
+// DAYS=2 we always have today + yesterday's pixels visible, with the
+// client filtering by acq time if a tighter window is needed.
 const SENSOR = 'VIIRS_SNPP_NRT';
-const DAYS   = 1;
+const DAYS   = 2;
 
 function parseCsv(text) {
   const lines = text.split('\n');
