@@ -960,6 +960,23 @@ function FlightRouteInfo({ icao24 }) {
 // datacenter-status poller (GCP + Cloudflare + Oracle + AWS covered —
 // Azure/Alibaba return "unknown"). Re-renders via the subscription so
 // the dossier updates if an incident appears/clears while it's open.
+// Public status-page URLs per provider. Used to render the "Open
+// <Provider> status ↗" link at the bottom of the DatacenterStatus pill
+// so users can jump to the authoritative dashboard for incident
+// details that we don't (or can't) surface inline.
+const HYPERSCALER_STATUS_URLS = {
+  aws:        'https://health.aws.amazon.com/health/status',
+  azure:      'https://azure.status.microsoft/en-us/status/',
+  gcp:        'https://status.cloud.google.com/',
+  cloudflare: 'https://www.cloudflarestatus.com/',
+  oci:        'https://ocistatus.oraclecloud.com/',
+  alibaba:    'https://status.alibabacloud.com/',
+};
+const HYPERSCALER_DISPLAY_NAMES = {
+  aws: 'AWS', azure: 'Azure', gcp: 'Google Cloud',
+  cloudflare: 'Cloudflare', oci: 'Oracle', alibaba: 'Alibaba Cloud',
+};
+
 function DatacenterStatus({ operator, region }) {
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -969,6 +986,9 @@ function DatacenterStatus({ operator, region }) {
   if (!operator || typeof window.getDcProviderStatus !== 'function') return null;
   const prov = window.getDcProviderStatus(operator);
   if (!prov) return null;
+  const opKey = String(operator).toLowerCase();
+  const statusUrl = HYPERSCALER_STATUS_URLS[opKey];
+  const providerDisplay = HYPERSCALER_DISPLAY_NAMES[opKey] || operator;
   const regionIncidents = region && typeof window.getDcRegionIncidents === 'function'
     ? window.getDcRegionIncidents(operator, region) : [];
   const stateColor = {
@@ -1007,6 +1027,12 @@ function DatacenterStatus({ operator, region }) {
         </div>
       )}
       {prov.note && <div className="text-[10px] opacity-50 font-mono italic">{prov.note}</div>}
+      {statusUrl && (
+        <a href={statusUrl} target="_blank" rel="noopener"
+           className="inline-block text-[11px] text-accent-500 underline pt-0.5">
+          {providerDisplay} status page ↗
+        </a>
+      )}
     </div>
   );
 }
