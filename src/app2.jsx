@@ -1638,15 +1638,15 @@ function App() {
       <div className="absolute top-3 sm:top-4 left-3 sm:left-4 right-3 sm:right-4 z-30 flex flex-col sm:flex-row items-stretch sm:items-start justify-between gap-2 sm:gap-3 pointer-events-none">
         <div className="flex items-center justify-between gap-2 pointer-events-auto min-w-0 sm:flex-wrap order-1">
           <div className="glass rounded-full pl-3 pr-3 sm:pr-4 py-2 flex items-center gap-2 shrink-0">
-            {/* Brand mark — same eye as the favicon. `currentColor` + the
-                text-accent-500 class on the wrapper means the glyph
-                matches the app accent automatically in either theme. */}
-            <svg viewBox="0 0 120 60" className="w-4 h-2.5 shrink-0 bpulse text-accent-500" aria-label="God's Eye" role="img">
-              <g fill="none" stroke="currentColor" strokeWidth="10" strokeLinejoin="round" strokeLinecap="round">
-                <path d="M 10 30 Q 60 -2 110 30 Q 60 62 10 30 Z"/>
-                <circle cx="60" cy="30" r="15"/>
+            {/* Brand mark — vector eye matching the favicon. Aspect 3:2
+                so the almond doesn't look squished. Outer almond + iris
+                stay solid; only the pupil pulses. */}
+            <svg viewBox="0 0 100 66" className="w-8 h-5 shrink-0 text-accent-500" aria-label="God's Eye" role="img">
+              <g fill="none" stroke="currentColor" strokeWidth="7" strokeLinejoin="round" strokeLinecap="round">
+                <path d="M 6 33 Q 50 -2 94 33 Q 50 68 6 33 Z"/>
+                <circle cx="50" cy="33" r="15"/>
               </g>
-              <circle cx="60" cy="30" r="8.5" fill="currentColor"/>
+              <circle cx="50" cy="33" r="9" fill="currentColor" className="bpulse"/>
             </svg>
             <span className="font-mono text-[11px] tracking-[0.2em] uppercase">God's Eye</span>
           </div>

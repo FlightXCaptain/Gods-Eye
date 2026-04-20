@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60" role="img" aria-label="God's Eye">
-  <g fill="none" stroke="#f43f5e" stroke-width="6" stroke-linejoin="round" stroke-linecap="round">
-    <!-- Almond eye outline -->
-    <path d="M 10 30 Q 60 -2 110 30 Q 60 62 10 30 Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 66" role="img" aria-label="God's Eye">
+  <g fill="none" stroke="#f43f5e" stroke-width="7" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Almond outer lens -->
+    <path d="M 6 33 Q 50 -2 94 33 Q 50 68 6 33 Z"/>
     <!-- Iris -->
-    <circle cx="60" cy="30" r="15"/>
+    <circle cx="50" cy="33" r="15"/>
   </g>
   <!-- Pupil -->
-  <circle cx="60" cy="30" r="8.5" fill="#f43f5e"/>
+  <circle cx="50" cy="33" r="9" fill="#f43f5e"/>
 </svg>
