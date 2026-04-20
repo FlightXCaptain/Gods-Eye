@@ -568,6 +568,14 @@ function Globe({
     return window.subscribeFires((list) => { firesRef.current = list || []; });
   }, []);
 
+  // Data centers — PeeringDB colos + hyperscaler cloud regions. Dataset
+  // is static (~4700 points); one-shot subscription is enough.
+  const datacentersRef = useRef([]);
+  useEffect(() => {
+    if (typeof window.subscribeDatacenters !== 'function') return;
+    return window.subscribeDatacenters((list) => { datacentersRef.current = list || []; });
+  }, []);
+
   // When the focused target is a ship, we load its 30-day IndexedDB
   // history and stash the polyline here. The draw loop renders it on the
   // overlay canvas with age-based alpha fade. Cleared when focus moves
@@ -2427,6 +2435,58 @@ function Globe({
         }
       }
 
+      // Data centers — PeeringDB colos + hyperscaler regions. Small square
+      // markers so they read as "infrastructure" vs. point-event dots.
+      // LOD-decimated because PeeringDB alone is ~4500 points; dense
+      // metros (London, NYC, Frankfurt, Singapore) would otherwise merge
+      // into solid blobs at world zoom.
+      if (layers.datacenters && datacentersRef.current && datacentersRef.current.length) {
+        const dcColor = (src) => src === 'hyperscaler'
+          ? 'rgba(186, 230, 253, 0.95)'   // cool light blue — cloud regions
+          : 'rgba(94, 234, 212, 0.85)';    // teal — PeeringDB colos
+        const dcPts = [];
+        for (const d of datacentersRef.current) {
+          if (typeof d.lat !== 'number' || typeof d.lon !== 'number') continue;
+          if (!visibleOn(projection, d.lon, d.lat)) continue;
+          const pt = projection([d.lon, d.lat]); if (!pt) continue;
+          dcPts.push({ px: pt[0], py: pt[1], d });
+        }
+        // Cell sizing tuned so hyperscaler region dots stay visible at
+        // any zoom while PeeringDB's dense metros collapse at low zoom.
+        const lod = classifyLOD(dcPts, Math.max(14, 22 / zoom));
+        // Draw hyperscaler on top of PeeringDB: two-pass render, PeeringDB
+        // first so cloud-region pins land on top of overlapping colos.
+        for (let pass = 0; pass < 2; pass++) {
+          const wantHyper = pass === 1;
+          for (let i = 0; i < dcPts.length; i++) {
+            const { px, py, d } = dcPts[i];
+            const isHyper = d.source === 'hyperscaler';
+            if (isHyper !== wantHyper) continue;
+            const { mode } = lod[i];
+            const col = dcColor(d.source);
+            octx.fillStyle = col;
+            const size = mode === 'full' ? (isHyper ? 4 : 2.5)
+                       : mode === 'compact' ? 2
+                       : 1.3;
+            // Squares for hyperscaler (cloud regions are infra nodes),
+            // circles for PeeringDB (colo facilities) — small visual
+            // distinction without needing a legend.
+            if (isHyper) {
+              octx.fillRect(px - size/2, py - size/2, size, size);
+            } else {
+              octx.beginPath();
+              octx.arc(px, py, size / 2, 0, Math.PI * 2);
+              octx.fill();
+            }
+            // Only full-LOD items get hit regions — otherwise hovering
+            // through a dense metro pops dossier every pixel.
+            if (mode === 'full') {
+              pushHit(px, py, Math.max(size, 4), 'datacenter', d);
+            }
+          }
+        }
+      }
+
       // Plane glyph — clean aviation-tracker silhouette, designed at 10px
       // nose-to-tail. Shared between flight rendering below.
       const planeFill   = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(20,20,30,0.88)';
@@ -3032,6 +3092,9 @@ function Globe({
           )}
           {hover._layer === 'fire' && (
             <span>Active fire · {hover.bright != null ? `${hover.bright} K` : 'thermal hotspot'}{hover.frp != null ? ` · FRP ${hover.frp}` : ''}</span>
+          )}
+          {hover._layer === 'datacenter' && (
+            <span>{hover.operator ? `${hover.operator.toUpperCase()} · ` : ''}{hover.name}{hover.city ? ` · ${hover.city}` : ''}</span>
           )}
           {hover._layer === 'lightning' && (() => {
             // Blitzortung encodes strike polarity as a signed number:
