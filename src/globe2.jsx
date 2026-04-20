@@ -1546,23 +1546,27 @@ function Globe({
 
       // Wind + ocean particle flow share one dedicated canvas with a
       // per-frame fade-clear so moving particles leave short-lived trails.
-      // The fade is unified across both layers so we never double-fade
-      // (harsh ghosting) or skip-and-stack (inconsistent decay).
+      //
+      // Fade alpha is TIME-based (scaled by frameDt), not frame-based.
+      // On 60 Hz the fade matches the old constant; on 120 Hz the per-
+      // frame alpha is halved so trails fade at the same wall-clock
+      // rate. Without this, 120 Hz monitors decayed trails twice as
+      // fast and the resulting half-length trails read as flicker.
       //
       // Per-particle teleport detection lives in each draw loop: if a
-      // particle's screen position jumped further than TELEPORT_PX in a
-      // single frame (auto-rotate + lon-180 wrap, sudden user pan, etc.)
-      // we skip the connecting line for that one frame but still update
-      // its prev coords. The previous "blank ALL particle prev coords on
-      // any view delta > 1.5°" approach caused a visible whole-canvas
-      // flash on every drag — replaced.
+      // particle's screen jump > TELEPORT_PX (lon-180 wrap or sudden
+      // user pan) we skip the connecting line for that frame but still
+      // update prev so the next frame paints a clean stroke.
       const isDarkW = theme === 'dark';
       const TELEPORT_PX = 30;
       const flowsOn = layers.wind || layers.oceanCurrents;
+      const fadeDt = Math.min(0.1, frameDt || 0.0167);
       if (flowsOn) {
+        // ~1.7 s half-life on the trail fade. Frame-rate independent.
+        const fadeAlpha = Math.min(0.08, (isDarkW ? 1.8 : 2.7) * fadeDt);
         wctx.save();
         wctx.globalCompositeOperation = 'destination-out';
-        wctx.fillStyle = `rgba(0,0,0,${isDarkW ? 0.03 : 0.045})`;
+        wctx.fillStyle = `rgba(0,0,0,${fadeAlpha.toFixed(3)})`;
         wctx.fillRect(0, 0, width, height);
         wctx.restore();
       } else if (wctx) {
@@ -1610,12 +1614,12 @@ function Globe({
         //
         //   effective motion = direction × sqrt(speed + 0.5) × SCALE × dt
         //
-        // SCALE_PER_SEC tuned for visible-but-not-frantic motion:
-        //  • Old 1.0 constant felt twitchy + made trails look like rain.
-        //  • 0.7 puts a 10 m/s wind at ~2.3°/s on the globe — readable as
-        //    flow without dominating the view, and matches the slower
-        //    perceived motion of major weather patterns.
-        const SCALE_PER_SEC = 0.7;
+        // SCALE_PER_SEC of 0.25 puts a 10 m/s wind at ~0.8°/s. Real
+        // wind at that speed is 0.0001°/s on Earth — we're 8000× faster
+        // than reality but still noticeably calmer than the old 0.7
+        // (which was 23000× real). Major weather patterns now drift at
+        // a pace closer to time-lapse video than to whirlwind.
+        const SCALE_PER_SEC = 0.25;
         // Clamp dt at frame-stall boundaries so a dropped-frame pause
         // doesn't launch every particle 5° in one step.
         const windDt = Math.min(0.1, frameDt || 0.0167);
@@ -1711,13 +1715,12 @@ function Globe({
           return `hsla(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%, ${alpha})`;
         };
 
-        // Ocean currents are slower than wind but the previous OCEAN_SCALE
-        // 14.0 made them appear ~2× faster than wind on screen — bad
-        // perceptual mismatch given currents move ~20× slower physically.
-        // Halved to 7.0; jets like the Gulf Stream and Kuroshio still
-        // read as motion, gyres feel like the slow drifts they actually
-        // are.
-        const OCEAN_SCALE_PER_SEC = 7.0;
+        // Ocean speed reduced to 1.5 — currents are physically ~20× slower
+        // than wind, so wind 0.25 with sqrt-compression vs ocean 1.5 with
+        // raw speed puts a 1 m/s Kuroshio jet at 1.5°/s and a 0.3 m/s
+        // typical current at 0.45°/s. Slow enough that the gyre patterns
+        // read as the slow drifts they actually are.
+        const OCEAN_SCALE_PER_SEC = 1.5;
         const oceanDt = Math.min(0.1, frameDt || 0.0167);
         const particles = oceanParticlesRef.current;
         for (let i = 0; i < particles.length; i++) {
@@ -2321,26 +2324,22 @@ function Globe({
           if (!visibleOn(projection, s.lon, s.lat)) continue;
           const pt = projection([s.lon, s.lat]);
           if (!pt) continue;
+          // Lightning was perceived as constant strobe — Blitzortung
+          // delivers thousands of strikes/min globally so at any moment
+          // there are dozens of bright flashes in various age states.
+          // Dimmer core (0.55 max alpha vs 0.95), smaller halo, faster
+          // decay → reads as subtle pinprick activity instead of
+          // dominating the view.
           const alpha = Math.max(0, 1 - age);
-          // Core flash
-          octx.fillStyle = `rgba(254, 240, 138, ${(alpha * 0.95).toFixed(3)})`;
+          octx.fillStyle = `rgba(254, 240, 138, ${(alpha * 0.55).toFixed(3)})`;
           octx.beginPath();
-          octx.arc(pt[0], pt[1], 1.5, 0, Math.PI * 2);
+          octx.arc(pt[0], pt[1], 1.2, 0, Math.PI * 2);
           octx.fill();
-          // Halo (expands + fades slightly faster than core). Faked as
-          // two alpha-stacked circles rather than allocating a fresh
-          // createRadialGradient per strike per frame — at the radii used
-          // here the visual difference is imperceptible and we avoid the
-          // GC churn on lightning-heavy frames.
-          const haloR = 3 + age * 9;
-          const haloAlpha = Math.max(0, (1 - age) * 0.55);
-          octx.fillStyle = `rgba(254, 240, 138, ${(haloAlpha * 0.4).toFixed(3)})`;
-          octx.beginPath();
-          octx.arc(pt[0], pt[1], haloR, 0, Math.PI * 2);
-          octx.fill();
+          const haloR = 2 + age * 5;
+          const haloAlpha = Math.max(0, (1 - age) * 0.25);
           octx.fillStyle = `rgba(254, 240, 138, ${haloAlpha.toFixed(3)})`;
           octx.beginPath();
-          octx.arc(pt[0], pt[1], haloR * 0.5, 0, Math.PI * 2);
+          octx.arc(pt[0], pt[1], haloR, 0, Math.PI * 2);
           octx.fill();
         }
       }
