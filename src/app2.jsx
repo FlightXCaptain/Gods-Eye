@@ -539,7 +539,11 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       <GlyphSVG kind={glyph} color={col} size={14}/>
                     </span>
                     <span className="text-sm flex-1">{label}</span>
-                    {k === 'quakes' && (
+                    {/* "M3.0+" current-value pill — hidden while the
+                        seismic slider is disabled; the layer still
+                        filters by `seismicMin` (loaded from localStorage
+                        or the 3.0 default), just no UI to adjust. */}
+                    {false && k === 'quakes' && (
                       <span className="font-mono text-[10px] tabular-nums text-accent-500 shrink-0">
                         M{seismicMin.toFixed(1)}+
                       </span>
@@ -704,10 +708,12 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       </label>
                     </div>
                   )}
-                  {/* Seismic magnitude floor — only the quake layer gets a
-                      secondary control. Placed directly below the toggle so
-                      the visual grouping ("this modifies THAT") is obvious. */}
-                  {k === 'quakes' && layers.quakes && (
+                  {/* Seismic magnitude floor slider — disabled for now.
+                      `seismicMin` state still exists (default from
+                      localStorage or "3.0+") so the quake layer still
+                      filters correctly; just no UI to adjust it. Restore
+                      by flipping `false` to `k === 'quakes' && layers.quakes`. */}
+                  {false && k === 'quakes' && layers.quakes && (
                     <div className="px-2 pb-1.5 pt-0.5">
                       <input type="range" min="0" max="9" step="0.5"
                              value={seismicMin}
@@ -842,6 +848,39 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     </div>
   );
 }
+
+// Search-type → layer-toggle(s) that must be ON for the item to render.
+// When a user picks a search result for a layer they've toggled off (or
+// a sub-layer whose parent is off), we auto-enable the relevant
+// toggles — otherwise the camera flies to an empty spot and the target
+// is invisible, which would baffle anyone. Infrastructure sub-layers
+// gate on BOTH the parent `infrastructure` toggle AND their specific
+// key (see globe2.jsx renderers: `if (layers.infrastructure && layers.reactors)`),
+// so both get enabled.
+const LAYER_FOR_TYPE = {
+  iss: ['iss'],
+  sat: ['sats'],
+  flight: ['flights'],
+  ship: ['ships'],
+  quake: ['quakes'],
+  event: ['events'],
+  news: ['news'],
+  cyclone: ['cyclones'],
+  reactor:    ['infrastructure', 'reactors'],
+  plant:      ['infrastructure', 'plants'],
+  datacenter: ['infrastructure', 'datacenters'],
+  fab:        ['infrastructure', 'fabs'],
+  refinery:   ['infrastructure', 'refineries'],
+  lng:        ['infrastructure', 'lng'],
+  gasproc:    ['infrastructure', 'gasproc'],
+  smelter:    ['infrastructure', 'smelters'],
+  mine:       ['infrastructure', 'mines'],
+  cement:     ['infrastructure', 'cement'],
+  dam:        ['infrastructure', 'dams'],
+  port:       ['infrastructure', 'ports'],
+  // Cities / countries / lakes are basemap features, always visible —
+  // no layer toggle controls them, so nothing to enable.
+};
 
 // Lock-on zoom presets per layer. Used by both the double-click focus
 // handler (handleFocusItem) and search-select (targets), so the same
@@ -2081,6 +2120,27 @@ function App() {
   // 10 is a city-level preset that matches GDELT's ActionGeo resolution
   // (events are geocoded to city granularity) and gives the user a
   // genuinely close view of the region rather than a continent pin.
+  // Wrapper for SearchBar's onLocate. Auto-enables the layer(s) that
+  // must be on for the selected item to actually be visible, so the
+  // camera doesn't land on what looks like empty ocean because the user
+  // had that layer toggled off. Infrastructure sub-types enable both
+  // the parent `infrastructure` toggle and the specific sub-layer,
+  // matching the gating in globe2.jsx's renderers.
+  const handleLocate = useCallback((t) => {
+    const keys = (t && LAYER_FOR_TYPE[t.type]) || null;
+    if (keys && keys.length) {
+      setLayers(prev => {
+        const next = { ...prev };
+        let changed = false;
+        for (const k of keys) {
+          if (next[k] !== true) { next[k] = true; changed = true; }
+        }
+        return changed ? next : prev;
+      });
+    }
+    setFocusTarget(t);
+  }, []);
+
   const pickNewsItem = useCallback((n) => {
     if (!n || !isFinite(n.lon) || !isFinite(n.lat)) return;
     setFocusTarget({
@@ -2397,7 +2457,9 @@ function App() {
       // Escape closes the dossier AND stops tracking — one keystroke to
       // reset the view without having to pan or hit the toolbar button.
       if (e.key === 'Escape') { setPicked(null); setFocusTarget(null); }
-      if (e.key === ' ') { e.preventDefault(); setPlaying(p=>!p); }
+      // Spacebar play/pause disabled while the time slider is hidden.
+      // Re-enable by uncommenting this line when TimeSlider comes back.
+      // if (e.key === ' ') { e.preventDefault(); setPlaying(p=>!p); }
     };
     window.addEventListener('keydown', on);
     return () => window.removeEventListener('keydown', on);
@@ -2543,7 +2605,7 @@ function App() {
           {/* Actions sit next to the brand on phones so they don't get pushed
               off-screen; on sm+ they detach to the right via the outer flex. */}
           <div className="flex items-center gap-1.5 sm:hidden">
-            <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
+            <SearchBar onLocate={handleLocate} targets={targets} theme={theme}/>
             <LayersPopover layers={layers} setLayers={setLayers} theme={theme}
   seismicMin={seismicMin} setSeismicMin={setSeismicMin}
   shipFilters={shipFilters} setShipFilters={setShipFilters}
@@ -2580,7 +2642,7 @@ function App() {
         </div>
         {/* Desktop action cluster (hidden on mobile — duplicated above) */}
         <div className="hidden sm:flex items-center gap-2 pointer-events-auto order-3">
-          <SearchBar onLocate={t=>setFocusTarget(t)} targets={targets} theme={theme}/>
+          <SearchBar onLocate={handleLocate} targets={targets} theme={theme}/>
           <LayersPopover layers={layers} setLayers={setLayers} theme={theme}
   seismicMin={seismicMin} setSeismicMin={setSeismicMin}
   shipFilters={shipFilters} setShipFilters={setShipFilters}
@@ -2625,11 +2687,17 @@ function App() {
       {/* Bottom controls */}
       <div className="absolute bottom-4 inset-x-0 z-10 flex flex-col items-center gap-3 pointer-events-none px-2">
         {TWEAK_DEFAULTS.showTicker && <div className="pointer-events-auto w-[min(780px,94vw)]"><Ticker items={ticker}/></div>}
-        <div className="pointer-events-auto w-[min(620px,94vw)]">
-          <TimeSlider nowCursor={nowCursor} setNowCursor={setNowCursor}
-                      playing={playing} setPlaying={setPlaying}
-                      playSpeed={playSpeed} setPlaySpeed={setPlaySpeed}/>
-        </div>
+        {/* Time slider (play/pause + scrub) disabled for now — wrap in
+            `{false && (...)}` so the state / effect wiring above keeps
+            working (nowCursor still ticks live) and this block can be
+            restored by flipping the guard to `true`. */}
+        {false && (
+          <div className="pointer-events-auto w-[min(620px,94vw)]">
+            <TimeSlider nowCursor={nowCursor} setNowCursor={setNowCursor}
+                        playing={playing} setPlaying={setPlaying}
+                        playSpeed={playSpeed} setPlaySpeed={setPlaySpeed}/>
+          </div>
+        )}
       </div>
 
       {tweaks && (
