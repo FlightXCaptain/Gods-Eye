@@ -2,7 +2,7 @@
 // recent flight's departure and arrival airports (resolved to lat/lon
 // through OurAirports' open CSV). The client draws a great-circle from
 // dep → arr on the globe when a flight is focused; the live ADS-B position
-// from /api/flights-stream continues to mark the actual plane on top.
+// from /api/stream (flights half) continues to mark the actual plane on top.
 //
 // Data sources:
 //   - OpenSky Network  /flights/aircraft?icao24=&begin=&end=
