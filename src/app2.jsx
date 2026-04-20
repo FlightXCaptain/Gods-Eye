@@ -335,6 +335,20 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <line x1="10" y1="17" x2="10" y2="20"/><line x1="14" y1="17" x2="14" y2="20"/>
         </svg>
       );
+    case 'refinery':
+      // Stylized fractionation column — a tall rectangle with horizontal
+      // divisions and a stubby top vent. Distinct from `fab` (square)
+      // and `bolt` (lightning).
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="9" y="4" width="6" height="16"/>
+          <line x1="9" y1="8" x2="15" y2="8"/>
+          <line x1="9" y1="12" x2="15" y2="12"/>
+          <line x1="9" y1="16" x2="15" y2="16"/>
+          <path d="M12 4 L12 2"/>
+          <path d="M6 20 L18 20"/>
+        </svg>
+      );
     default: return <svg {...props}><circle cx="7" cy="7" r="2" fill={color}/></svg>;
   }
 };
@@ -449,6 +463,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                     <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-0.5">
                       {/* Energy group */}
                       {[
+                        ['refineries', 'Oil refineries',    'refinery',  '#a16207'],
                         ['plants',     'Power plants',      'bolt',      '#f59e0b'],
                         ['reactors',   'Nuclear reactors',  'radiation', '#22c55e'],
                         ['fabs',       'Semiconductor fabs','fab',       '#a78bfa'],
@@ -956,6 +971,14 @@ function Dossier({ item, onClose }) {
           <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
           <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(item.operator)}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">Wikipedia →</a>
         </>}
+        {layer === 'refinery' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Oil refinery{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.capacity_bpd != null && <KV k="Capacity" v={`${Math.round(item.capacity_bpd).toLocaleString()} bpd`}/>}
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
+        </>}
         {layer === 'city' && <>
           <div className="text-lg">{item.name}</div>
           {item.country && <div className="text-sm opacity-70">{item.country}{item.admin1 ? ` · ${item.admin1}` : ''}</div>}
@@ -1378,7 +1401,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, infrastructure:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, infrastructure:false };
     // One-shot migration: users who had any infrastructure sub-layer enabled
     // before the parent toggle existed should have the parent auto-enabled
     // on first load of this version. Detect by: `infrastructure` key absent
@@ -1667,6 +1690,7 @@ function App() {
     fetchNuclearReactors().then(r => { if (alive) setData(d => ({ ...d, reactors: r })); });
     fetchPowerPlants().then(p => { if (alive) setData(d => ({ ...d, plants: p })); });
     if (typeof window.fetchFabs === 'function') window.fetchFabs().then(f => { if (alive) setData(d => ({ ...d, fabs: f })); });
+    if (typeof window.fetchRefineries === 'function') window.fetchRefineries().then(x => { if (alive) setData(d => ({ ...d, refineries: x })); });
     return () => { alive = false; clearInterval(id); };
   }, []);
 
