@@ -1,0 +1,22 @@
+[
+  { "id": "karsto", "name": "Kårstø", "operator": "Gassco", "country": "Norway", "lat": 59.280, "lon": 5.500 },
+  { "id": "kollsnes", "name": "Kollsnes", "operator": "Gassco", "country": "Norway", "lat": 60.540, "lon": 4.840 },
+  { "id": "orenburg", "name": "Orenburg", "operator": "Gazprom", "country": "Russia", "lat": 51.770, "lon": 55.100 },
+  { "id": "astrakhan", "name": "Astrakhan", "operator": "Gazprom", "country": "Russia", "lat": 46.350, "lon": 48.040 },
+  { "id": "novyy-urengoy", "name": "Novyy Urengoy", "operator": "Gazprom", "country": "Russia", "lat": 66.090, "lon": 76.680 },
+  { "id": "shaybah-gosp", "name": "Shaybah GOSP", "operator": "Saudi Aramco", "country": "Saudi Arabia", "lat": 22.540, "lon": 53.970 },
+  { "id": "hawiyah-gpp", "name": "Hawiyah Gas Plant", "operator": "Saudi Aramco", "country": "Saudi Arabia", "lat": 24.240, "lon": 49.400 },
+  { "id": "habshan", "name": "Habshan", "operator": "ADNOC", "country": "United Arab Emirates", "lat": 23.370, "lon": 53.750 },
+  { "id": "ruwais-gas", "name": "Ruwais Gas Processing", "operator": "ADNOC", "country": "United Arab Emirates", "lat": 24.110, "lon": 52.720 },
+  { "id": "ras-laffan-gpp", "name": "Ras Laffan Gas Processing", "operator": "QatarEnergy", "country": "Qatar", "lat": 25.870, "lon": 51.550 },
+  { "id": "groningen", "name": "Groningen", "operator": "NAM / GasTerra", "country": "Netherlands", "lat": 53.330, "lon": 6.930 },
+  { "id": "hassi-rmel", "name": "Hassi R'Mel", "operator": "Sonatrach", "country": "Algeria", "lat": 32.800, "lon": 3.200 },
+  { "id": "in-salah", "name": "In Salah", "operator": "Sonatrach / BP / Equinor", "country": "Algeria", "lat": 27.180, "lon": 2.460 },
+  { "id": "karachaganak", "name": "Karachaganak", "operator": "KPO", "country": "Kazakhstan", "lat": 51.280, "lon": 51.700 },
+  { "id": "moomba", "name": "Moomba", "operator": "Santos", "country": "Australia", "lat": -28.070, "lon": 140.050 },
+  { "id": "longford", "name": "Longford", "operator": "ExxonMobil", "country": "Australia", "lat": -37.980, "lon": 146.590 },
+  { "id": "mont-belvieu", "name": "Mont Belvieu NGL Hub", "operator": "Enterprise / EPD", "country": "United States", "lat": 29.820, "lon": -94.880 },
+  { "id": "deer-park", "name": "Deer Park", "operator": "Shell / Pemex", "country": "United States", "lat": 29.710, "lon": -95.130 },
+  { "id": "fort-mcmurray", "name": "Fort McMurray / Athabasca", "operator": "Suncor / others", "country": "Canada", "lat": 56.730, "lon": -111.390 },
+  { "id": "aguada-pichana", "name": "Aguada Pichana", "operator": "YPF / Total", "country": "Argentina", "lat": -37.720, "lon": -68.990 }
+]

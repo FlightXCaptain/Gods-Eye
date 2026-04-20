@@ -303,6 +303,134 @@ function iconRadiation(ctx, cx, cy, size, color) {
   ctx.fill();
 }
 
+// ── Infrastructure sub-layer icons ────────────────────────────────
+// Each draws a small iconic silhouette rather than a generic dot so
+// the map reads as "kind of thing" not "anonymous point". Sized 6–10
+// screen pixels, fill+stroke combination for clarity at small scales.
+
+// Fab — a square die with 8 pins (2 per side). Reads as "packaged IC".
+function iconFab(ctx, cx, cy, size, color) {
+  const r = size * 0.42;
+  ctx.fillStyle = color + 'bb';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.8;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+  ctx.beginPath();
+  const pin = r * 0.45;
+  for (const off of [-r * 0.45, r * 0.45]) {
+    ctx.moveTo(cx - r, cy + off); ctx.lineTo(cx - r - pin, cy + off);
+    ctx.moveTo(cx + r, cy + off); ctx.lineTo(cx + r + pin, cy + off);
+    ctx.moveTo(cx + off, cy - r); ctx.lineTo(cx + off, cy - r - pin);
+    ctx.moveTo(cx + off, cy + r); ctx.lineTo(cx + off, cy + r + pin);
+  }
+  ctx.stroke();
+}
+
+// Refinery — a vertical fractionation column with two stage lines and
+// a small flare stack on top.
+function iconRefinery(ctx, cx, cy, size, color) {
+  const h = size * 1.1;
+  const w = size * 0.55;
+  ctx.fillStyle = color + 'aa';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.8;
+  ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+  ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+  ctx.beginPath();
+  ctx.moveTo(cx - w / 2, cy - h * 0.15); ctx.lineTo(cx + w / 2, cy - h * 0.15);
+  ctx.moveTo(cx - w / 2, cy + h * 0.15); ctx.lineTo(cx + w / 2, cy + h * 0.15);
+  ctx.moveTo(cx, cy - h / 2); ctx.lineTo(cx, cy - h / 2 - size * 0.28);
+  ctx.stroke();
+}
+
+// LNG terminal — a spherical cryogenic tank with an equator line and
+// a small vent stub on top. Distinct from generic circles.
+function iconLng(ctx, cx, cy, size, color) {
+  const r = size * 0.5;
+  ctx.fillStyle = color + 'aa';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
+  ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy - r - size * 0.22);
+  ctx.stroke();
+}
+
+// Gas processing — cluster of three small spherical tanks with vent
+// stubs. Reads as "industrial gas facility" not "single round thing".
+function iconGasProcessing(ctx, cx, cy, size, color) {
+  const r = size * 0.28;
+  ctx.fillStyle = color + 'bb';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.7;
+  for (const dx of [-r * 1.5, 0, r * 1.5]) {
+    ctx.beginPath();
+    ctx.arc(cx + dx, cy + r * 0.1, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  for (const dx of [-r * 1.5, 0, r * 1.5]) {
+    ctx.moveTo(cx + dx, cy - r * 0.9); ctx.lineTo(cx + dx, cy - r * 1.5);
+  }
+  ctx.stroke();
+}
+
+// Dam — a trapezoidal wall (slightly tapered) with a stylized water
+// ripple above it. Reads as "dam wall holding back water".
+function iconDam(ctx, cx, cy, size, color) {
+  const w = size * 1.15;
+  const h = size * 0.45;
+  ctx.fillStyle = color + 'aa';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.42, cy - h / 2);
+  ctx.lineTo(cx + w * 0.42, cy - h / 2);
+  ctx.lineTo(cx + w / 2, cy + h / 2);
+  ctx.lineTo(cx - w / 2, cy + h / 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Water ripple above the crown
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.42, cy - h / 2 - size * 0.18);
+  ctx.quadraticCurveTo(cx - w * 0.15, cy - h / 2 - size * 0.38, cx, cy - h / 2 - size * 0.18);
+  ctx.quadraticCurveTo(cx + w * 0.15, cy - h / 2 - size * 0.02, cx + w * 0.42, cy - h / 2 - size * 0.18);
+  ctx.stroke();
+}
+
+// Port — classic anchor silhouette (ring + shaft + cross bar + flukes).
+function iconPort(ctx, cx, cy, size, color) {
+  const r = size * 0.5;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 1.0;
+  // Top ring
+  ctx.beginPath();
+  ctx.arc(cx, cy - r * 0.75, Math.max(1.1, r * 0.26), 0, Math.PI * 2);
+  ctx.stroke();
+  // Vertical shaft
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r * 0.49);
+  ctx.lineTo(cx, cy + r * 0.85);
+  ctx.stroke();
+  // Cross bar
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.55, cy - r * 0.18);
+  ctx.lineTo(cx + r * 0.55, cy - r * 0.18);
+  ctx.stroke();
+  // Lower arc (flukes)
+  ctx.beginPath();
+  ctx.arc(cx, cy + r * 0.2, r * 0.8, Math.PI * 0.15, Math.PI * 0.85);
+  ctx.stroke();
+}
+
 // Small power-plant glyph: circle outline + bolt inside. Cheap enough to
 // draw thousands per frame for the WRI fleet layer.
 function iconPlant(ctx, cx, cy, size, color) {
@@ -2211,30 +2339,22 @@ function Globe({
         octx.restore();
       }
 
-      // Semiconductor fabs (curated list, ~40 entries). Small enough
-      // we don't need LOD clustering — draw every fab in view as a
-      // small chip-like square with a thin outline. Uniform color
-      // `#a78bfa` (silicon purple).
+      // Semiconductor fabs (curated list, ~40 entries). Iconic chip
+      // silhouette (square die with pins) via iconFab. No LOD needed
+      // at this dataset size.
       if (layers.infrastructure && layers.fabs && Array.isArray(data.fabs) && data.fabs.length) {
-        octx.save();
-        octx.fillStyle = '#a78bfaee';
-        octx.strokeStyle = '#ede9fe';
-        octx.lineWidth = 0.8;
         for (const f of data.fabs) {
           if (!visibleOn(projection, f.lon, f.lat)) continue;
           const pt = projection([f.lon, f.lat]); if (!pt) continue;
-          const s = 4.2;
-          octx.fillRect(pt[0] - s / 2, pt[1] - s / 2, s, s);
-          octx.strokeRect(pt[0] - s / 2, pt[1] - s / 2, s, s);
-          pushHit(pt[0], pt[1], 6, 'fab', f);
+          iconFab(octx, pt[0], pt[1], 8, '#a78bfa');
+          pushHit(pt[0], pt[1], 8, 'fab', f);
         }
-        octx.restore();
       }
 
-      // Oil refineries (OSM Overpass, ~600 entries globally). Rendered as
-      // small rust-brown tank silhouettes. LOD via simple cell-dedup at
-      // low zoom to keep the map readable in dense regions (Gulf Coast,
-      // Middle East, Rotterdam-Antwerp cluster).
+      // Oil refineries (OSM Overpass, ~600 entries globally). Iconic
+      // fractionation-column silhouette via iconRefinery. LOD via
+      // cell-dedup at low zoom keeps dense regions (Gulf Coast,
+      // Middle East, ARA cluster) readable.
       if (layers.infrastructure && layers.refineries && Array.isArray(data.refineries) && data.refineries.length) {
         const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.4 : 1.0;
         const cell = new Map();
@@ -2244,53 +2364,39 @@ function Globe({
           const key = Math.round(r.lon / cellDeg) + '|' + Math.round(r.lat / cellDeg);
           if (!cell.has(key)) cell.set(key, r);
         }
-        octx.save();
-        octx.fillStyle = '#a16207ee';
-        octx.strokeStyle = '#fde68a';
-        octx.lineWidth = 0.8;
         for (const r of cell.values()) {
           const pt = projection([r.lon, r.lat]); if (!pt) continue;
-          // Small circle with a subtle stroke — visually distinct from
-          // fabs (squares) and power plants (icon-in-circle).
-          octx.beginPath();
-          octx.arc(pt[0], pt[1], 2.4, 0, Math.PI * 2);
-          octx.fill();
-          octx.stroke();
-          pushHit(pt[0], pt[1], 6, 'refinery', r);
+          iconRefinery(octx, pt[0], pt[1], 7, '#a16207');
+          pushHit(pt[0], pt[1], 8, 'refinery', r);
         }
-        octx.restore();
       }
 
-      // LNG terminals (curated list, ~35 entries). Small dataset — no
-      // LOD clustering needed. Rendered as small ice-blue diamonds to
-      // visually distinguish from refinery circles and fab squares.
+      // LNG terminals (curated list, ~35 entries). Iconic spherical
+      // cryogenic tank via iconLng.
       if (layers.infrastructure && layers.lng && Array.isArray(data.lng) && data.lng.length) {
-        octx.save();
-        octx.fillStyle = '#93c5fdee';
-        octx.strokeStyle = '#dbeafe';
-        octx.lineWidth = 0.8;
         for (const t of data.lng) {
           if (!visibleOn(projection, t.lon, t.lat)) continue;
           const pt = projection([t.lon, t.lat]); if (!pt) continue;
-          // Diamond (45° rotated square).
-          const s = 3.2;
-          octx.beginPath();
-          octx.moveTo(pt[0], pt[1] - s);
-          octx.lineTo(pt[0] + s, pt[1]);
-          octx.lineTo(pt[0], pt[1] + s);
-          octx.lineTo(pt[0] - s, pt[1]);
-          octx.closePath();
-          octx.fill();
-          octx.stroke();
-          pushHit(pt[0], pt[1], 6, 'lng', t);
+          iconLng(octx, pt[0], pt[1], 7, '#60a5fa');
+          pushHit(pt[0], pt[1], 8, 'lng', t);
         }
-        octx.restore();
       }
 
-      // Major dams (OSM Overpass, ~200 entries). Rendered as small
-      // filled horizontal bars — reads as "dam wall" at small sizes.
-      // Mild LOD cell-dedup at low zoom keeps dense river regions
-      // (Himalayas, Alps) readable.
+      // Gas processing (curated list, ~20 entries). Iconic cluster of
+      // spherical tanks via iconGasProcessing. Distinct from LNG both
+      // in shape (cluster vs. single sphere) and color (teal vs. blue).
+      if (layers.infrastructure && layers.gasproc && Array.isArray(data.gasproc) && data.gasproc.length) {
+        for (const g of data.gasproc) {
+          if (!visibleOn(projection, g.lon, g.lat)) continue;
+          const pt = projection([g.lon, g.lat]); if (!pt) continue;
+          iconGasProcessing(octx, pt[0], pt[1], 8, '#0e7490');
+          pushHit(pt[0], pt[1], 8, 'gasproc', g);
+        }
+      }
+
+      // Major dams (OSM Overpass, ~200 entries). Iconic wall-with-
+      // water silhouette via iconDam. LOD cell-dedup at low zoom
+      // keeps dense river regions (Himalayas, Alps) readable.
       if (layers.infrastructure && layers.dams && Array.isArray(data.dams) && data.dams.length) {
         const cellDeg = zoom >= 3 ? 0 : zoom >= 2 ? 0.6 : 1.5;
         const cell = new Map();
@@ -2300,42 +2406,22 @@ function Globe({
           const key = Math.round(d.lon / cellDeg) + '|' + Math.round(d.lat / cellDeg);
           if (!cell.has(key)) cell.set(key, d);
         }
-        octx.save();
-        octx.fillStyle = '#3b82f6ee';
-        octx.strokeStyle = '#bfdbfe';
-        octx.lineWidth = 0.7;
         for (const d of cell.values()) {
           const pt = projection([d.lon, d.lat]); if (!pt) continue;
-          octx.fillRect(pt[0] - 2.75, pt[1] - 1, 5.5, 2);
-          octx.strokeRect(pt[0] - 2.75, pt[1] - 1, 5.5, 2);
-          pushHit(pt[0], pt[1], 6, 'dam', d);
+          iconDam(octx, pt[0], pt[1], 7, '#3b82f6');
+          pushHit(pt[0], pt[1], 8, 'dam', d);
         }
-        octx.restore();
       }
 
-      // Major ports (curated, ~50 entries). Rendered as small upward
-      // triangles — anchor-like silhouette at small sizes, visually
-      // distinct from refinery circles, fab squares, lng diamonds,
-      // and dam bars.
+      // Major ports (curated, ~50 entries). Classic anchor silhouette
+      // via iconPort.
       if (layers.infrastructure && layers.ports && Array.isArray(data.ports) && data.ports.length) {
-        octx.save();
-        octx.fillStyle = '#10b981ee';
-        octx.strokeStyle = '#a7f3d0';
-        octx.lineWidth = 0.8;
         for (const p of data.ports) {
           if (!visibleOn(projection, p.lon, p.lat)) continue;
           const pt = projection([p.lon, p.lat]); if (!pt) continue;
-          const s = 3.4;
-          octx.beginPath();
-          octx.moveTo(pt[0], pt[1] - s);
-          octx.lineTo(pt[0] + s * 0.9, pt[1] + s * 0.7);
-          octx.lineTo(pt[0] - s * 0.9, pt[1] + s * 0.7);
-          octx.closePath();
-          octx.fill();
-          octx.stroke();
-          pushHit(pt[0], pt[1], 6, 'port', p);
+          iconPort(octx, pt[0], pt[1], 8, '#10b981');
+          pushHit(pt[0], pt[1], 8, 'port', p);
         }
-        octx.restore();
       }
 
       // Oil & gas pipelines (curated, ~20 entries with multi-waypoint
@@ -3308,6 +3394,9 @@ function Globe({
           )}
           {hover._layer === 'lng' && (
             <span>{hover.name}{hover.type ? ` · ${hover.type}` : ''}{hover.capacity_mtpa ? ` · ${hover.capacity_mtpa} mtpa` : ''}</span>
+          )}
+          {hover._layer === 'gasproc' && (
+            <span>{hover.name}{hover.operator ? ` · ${hover.operator}` : ''}{hover.country ? ` · ${hover.country}` : ''}</span>
           )}
           {hover._layer === 'dam' && (
             <span>{hover.name}{hover.dam_type ? ` · ${hover.dam_type.replace(/_/g, ' ')}` : ''}{hover.height_m ? ` · ${hover.height_m} m` : ''}</span>
