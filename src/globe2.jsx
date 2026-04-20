@@ -579,14 +579,6 @@ function Globe({
   const targetRotRef = useRef([0, -15, 0]);
   const targetScaleRef = useRef(scaleRef.current);
   const dirtyBase = useRef(true);
-  // Tracks whether the previous frame was still inside the 200 ms
-  // "recentlyMoved" window. When it transitions true → false the base
-  // canvas needs one more redraw so the land LOD tier can upgrade from
-  // 110m (used during motion) to 50m/10m (used when stationary). Without
-  // this edge-detect the dirty-flag system never fires on motion-stop —
-  // nothing else writes dirtyBase once the scale/rotation lerp converges
-  // — so the higher-res tiers never actually render.
-  const wasRecentlyMovedRef = useRef(false);
   const hoverRef = useRef(null);
   const hoverAppliedRef = useRef(null); // mirrors the last value pushed into React state so the tick-loop compare avoids tearing down the RAF on every mousemove
   const [hover, setHover] = useState(null);
@@ -1454,21 +1446,6 @@ function Globe({
       }
       const recentlyMoved = tickNow - lastMoveTs < 200;
 
-      // Edge-detect motion-stop. The land-tier selector in the base
-      // draw block below picks 110m while recentlyMoved is true and
-      // 50m/10m while false — but the dirty-flag cache is only
-      // invalidated by things that *actively change* (lerp, wheel,
-      // auto-rotate, data arrival). `recentlyMoved` flips from true
-      // to false after a 200 ms timeout with no code path writing
-      // anything, so without this one-shot dirty we'd stay frozen at
-      // whatever tier was drawn during the last motion frame (110m).
-      // Flagging dirty here guarantees the final redraw picks up the
-      // stationary-tier upgrade (50m / 10m).
-      if (wasRecentlyMovedRef.current && !recentlyMoved) {
-        dirtyBase.current = true;
-      }
-      wasRecentlyMovedRef.current = recentlyMoved;
-
       // Auto-rotate runs whenever the prop is true. Interactions flip it
       // off via onInteract (parent owns the flag). Base redraw is throttled
       // to ~30fps so we don't reparse every Natural Earth feature at 60 Hz.
@@ -1634,24 +1611,31 @@ function Globe({
           bctx.restore();
         }
 
-        // Land — wireframe outline (the signature look). Tier picked
-        // per zoom + motion state:
-        //   • 110m (<200 polys, ~100 KB) — any active motion or
-        //     globe-scale zoom. Includes drag, pinch, inertial
-        //     scroll, focus tween, auto-rotate.
-        //   • 50m  (~700 polys, ~700 KB) — still, regional zoom.
-        //   • 10m  (~15 k polys, ~3 MB)  — still AND zoomed in
-        //     (≥4). The only state where Malta / Guam / Caymans
-        //     coastlines actually read at pixel scale. Bumped the
-        //     threshold from 3 → 4 because even 10m at zoom 3 hurts
-        //     FPS during the panning most users do at that zoom.
+        // Land — wireframe outline (the signature look). Tier is a
+        // *pure* function of zoomB. It used to also depend on
+        // `recentlyMoved` to drop to 110m for FPS during pan/zoom, but
+        // that produced a visible "reload" on every interaction — the
+        // map was constantly swapping between tiers, and at high zoom
+        // (where most 10m polys are off-screen anyway) the FPS argument
+        // didn't even apply. Pinning to zoomB means: once you've zoomed
+        // in far enough to warrant 10m, you keep seeing 10m, stable,
+        // across pan and further zoom within the same band.
+        //
+        // Thresholds (raised from earlier 1.4 / 4 so finer tiers only
+        // kick in when you're actually zoomed in far enough for the
+        // extra detail to *read* on screen — showing 10m at
+        // continent-scale zoom burns bytes without changing what the
+        // user sees):
+        //   • zoomB < 3  →  110m   (~100 KB, ~175 polys)   globe + default
+        //   • zoomB < 8  →  50m    (~550 KB, ~1400 polys)  regional
+        //   • zoomB ≥ 8  →  10m    (~3 MB,  ~4000 polys)   close-in
         //
         // Tiers fall back gracefully while the higher-res files are
         // still streaming.
         const landTier =
-          recentlyMoved || zoomB < 1.4 ? (landLowRef.current  || landMidRef.current || landHighRef.current) :
-          zoomB < 4                    ? (landMidRef.current  || landLowRef.current || landHighRef.current) :
-                                          (landHighRef.current || landMidRef.current || landLowRef.current);
+          zoomB < 3 ? (landLowRef.current  || landMidRef.current  || landHighRef.current) :
+          zoomB < 8 ? (landMidRef.current  || landLowRef.current  || landHighRef.current) :
+                      (landHighRef.current || landMidRef.current  || landLowRef.current);
         if (landTier) {
           landRef.current = landTier;
           bctx.beginPath(); path(landTier);
