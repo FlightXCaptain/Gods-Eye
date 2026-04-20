@@ -601,11 +601,12 @@ function Globe({
       pool[i] = {
         lon: Math.random() * 360 - 180,
         lat: (Math.random() - 0.5) * 170,   // avoid absolute poles
-        // Longer lifetimes (~4-14 s at 60fps) so the respawn rate is lower
-        // and flow lines read as continuous streams rather than blinking
-        // dashes.
-        age: Math.random() * 400,
-        maxAge: 240 + Math.floor(Math.random() * 600),
+        // Lifetimes 8-30 s at 60 fps. Longer than before — short
+        // lifetimes meant ~150-500 particles respawning per frame at
+        // random locations, which read as visible sparkle/flicker.
+        // Doubled so the respawn signal blends into the steady flow.
+        age: Math.random() * 600,
+        maxAge: 480 + Math.floor(Math.random() * 1300),
         prevX: null, prevY: null,
       };
     }
@@ -620,8 +621,10 @@ function Globe({
       pool[i] = {
         lon: Math.random() * 360 - 180,
         lat: (Math.random() - 0.5) * 160,
-        age: Math.random() * 400,
-        maxAge: 360 + Math.floor(Math.random() * 800), // longer streamers for slow flows
+        // Even longer than wind — currents move slowly so longer streamers
+        // emphasise the gyre patterns rather than flickering them away.
+        age: Math.random() * 900,
+        maxAge: 720 + Math.floor(Math.random() * 1800),
         prevX: null, prevY: null,
       };
     }
@@ -1535,11 +1538,32 @@ function Globe({
         dirtyBase.current = false;
       }
 
-      // Wind particle flow. Dedicated canvas using fade-clear (paint a
-      // translucent rect over the whole thing each frame) so moving particles
-      // leave short-lived trails. Bilinear interpolation on the 5° grid
-      // smooths the motion between anchor points.
+      // Wind + ocean particle flow share one dedicated canvas with a
+      // per-frame fade-clear so moving particles leave short-lived trails.
+      // The fade is unified across both layers so we never double-fade
+      // (harsh ghosting) or skip-and-stack (inconsistent decay).
+      //
+      // Per-particle teleport detection lives in each draw loop: if a
+      // particle's screen position jumped further than TELEPORT_PX in a
+      // single frame (auto-rotate + lon-180 wrap, sudden user pan, etc.)
+      // we skip the connecting line for that one frame but still update
+      // its prev coords. The previous "blank ALL particle prev coords on
+      // any view delta > 1.5°" approach caused a visible whole-canvas
+      // flash on every drag — replaced.
       const isDarkW = theme === 'dark';
+      const TELEPORT_PX = 30;
+      const flowsOn = layers.wind || layers.oceanCurrents;
+      if (flowsOn) {
+        wctx.save();
+        wctx.globalCompositeOperation = 'destination-out';
+        wctx.fillStyle = `rgba(0,0,0,${isDarkW ? 0.03 : 0.045})`;
+        wctx.fillRect(0, 0, width, height);
+        wctx.restore();
+      } else if (wctx) {
+        // Both off — clear once so no leftover trails persist.
+        wctx.clearRect(0, 0, width, height);
+      }
+
       if (layers.wind && windGridRef.current) {
         const g = windGridRef.current;
         const { latMin, lonMin, latStep, lonStep, nLat, nLon, u, v } = g;
@@ -1562,36 +1586,6 @@ function Globe({
           return [uu, vv];
         };
 
-        // Hard-reset particle prev-coords on *big* frame-to-frame jumps
-        // (user pan fling, sudden zoom). The previous version only
-        // updated windViewRef when a reset fired, so auto-rotate's
-        // steady 4°/s drift accumulated until it crossed the 0.6°
-        // threshold ~7 times per second — every reset blanked all
-        // particle trails for one frame, producing the "wind is
-        // flashing" artifact. Updating the view snapshot every frame
-        // converts the check into frame-delta and the threshold only
-        // trips on genuine sudden moves.
-        const view = windViewRef.current;
-        const rNow = rotRef.current, sNow = scaleRef.current;
-        if (view) {
-          const dLon = Math.abs(view[0] - rNow[0]);
-          const dLat = Math.abs(view[1] - rNow[1]);
-          const dSc  = Math.abs(view[2] - sNow);
-          if (dLon > 1.5 || dLat > 1.5 || dSc > 4.0) {
-            const particles = windParticlesRef.current;
-            for (let i = 0; i < particles.length; i++) {
-              particles[i].prevX = null;
-              particles[i].prevY = null;
-            }
-          }
-        }
-        windViewRef.current = [rNow[0], rNow[1], sNow];
-        wctx.save();
-        wctx.globalCompositeOperation = 'destination-out';
-        wctx.fillStyle = `rgba(0,0,0,${isDarkW ? 0.025 : 0.04})`;
-        wctx.fillRect(0, 0, width, height);
-        wctx.restore();
-
         // Map m/s → HSL colour. Blue for calm, through cyan / green / yellow
         // / orange / red, maxing out at "hurricane" speeds.
         const windColor = (speed, alpha) => {
@@ -1608,12 +1602,12 @@ function Globe({
         //
         //   effective motion = direction × sqrt(speed + 0.5) × SCALE × dt
         //
-        // SCALE_PER_SEC is calibrated so 60-fps behaviour matches the old
-        // frame-scaled constant while also working correctly on 120 Hz
-        // displays (where the previous formula made particles fly 2× too
-        // fast). Dropped slightly vs the old 1.5 effective to address
-        // "wind feels too fast" feedback.
-        const SCALE_PER_SEC = 1.0;
+        // SCALE_PER_SEC tuned for visible-but-not-frantic motion:
+        //  • Old 1.0 constant felt twitchy + made trails look like rain.
+        //  • 0.7 puts a 10 m/s wind at ~2.3°/s on the globe — readable as
+        //    flow without dominating the view, and matches the slower
+        //    perceived motion of major weather patterns.
+        const SCALE_PER_SEC = 0.7;
         // Clamp dt at frame-stall boundaries so a dropped-frame pause
         // doesn't launch every particle 5° in one step.
         const windDt = Math.min(0.1, frameDt || 0.0167);
@@ -1650,18 +1644,21 @@ function Globe({
           const pt = projection([p.lon, p.lat]);
           if (!pt) continue;
           if (p.prevX != null && p.prevY != null) {
-            wctx.beginPath();
-            wctx.moveTo(p.prevX, p.prevY);
-            wctx.lineTo(pt[0], pt[1]);
-            wctx.strokeStyle = windColor(speed, 0.9);
-            wctx.lineWidth = 1.3;
-            wctx.stroke();
+            // Per-particle teleport guard — auto-rotate plus a 180°-meridian
+            // wrap can put prev → current on opposite sides of the canvas.
+            // Drawing that line would smear a streak across the globe.
+            const dx = pt[0] - p.prevX, dy = pt[1] - p.prevY;
+            if (dx*dx + dy*dy < TELEPORT_PX*TELEPORT_PX) {
+              wctx.beginPath();
+              wctx.moveTo(p.prevX, p.prevY);
+              wctx.lineTo(pt[0], pt[1]);
+              wctx.strokeStyle = windColor(speed, 0.9);
+              wctx.lineWidth = 1.3;
+              wctx.stroke();
+            }
           }
           p.prevX = pt[0]; p.prevY = pt[1];
         }
-      } else if (wctx && !layers.wind && !layers.oceanCurrents) {
-        // Both flow layers off — clear the shared canvas once per frame.
-        wctx.clearRect(0, 0, width, height);
       }
 
       // Ocean currents — mirror of the wind particle engine, sharing the
@@ -1688,30 +1685,6 @@ function Globe({
           return [uu, vv];
         };
 
-        // Same frame-delta pattern as the wind block — update the view
-        // snapshot every frame so auto-rotate drift can't accumulate into
-        // a spurious reset.
-        const oview = oceanViewRef.current;
-        const rNow = rotRef.current, sNow = scaleRef.current;
-        if (oview) {
-          const dLon = Math.abs(oview[0] - rNow[0]);
-          const dLat = Math.abs(oview[1] - rNow[1]);
-          const dSc  = Math.abs(oview[2] - sNow);
-          if (dLon > 1.5 || dLat > 1.5 || dSc > 4.0) {
-            const ps = oceanParticlesRef.current;
-            for (let i = 0; i < ps.length; i++) { ps[i].prevX = null; ps[i].prevY = null; }
-          }
-        }
-        oceanViewRef.current = [rNow[0], rNow[1], sNow];
-        // Skip the fade-clear if the wind layer already did it this frame.
-        if (!layers.wind) {
-          wctx.save();
-          wctx.globalCompositeOperation = 'destination-out';
-          wctx.fillStyle = `rgba(0,0,0,${isDarkW ? 0.02 : 0.035})`;
-          wctx.fillRect(0, 0, width, height);
-          wctx.restore();
-        }
-
         // Deep-water palette: currents never get "warm". Calm flows read
         // as deep teal; the Gulf Stream, Kuroshio, and similar jets pop
         // bright cyan.
@@ -1723,9 +1696,13 @@ function Globe({
           return `hsla(${hue.toFixed(0)}, ${sat.toFixed(0)}%, ${light.toFixed(0)}%, ${alpha})`;
         };
 
-        // Ocean currents are ~10-20× slower than wind so the per-second
-        // constant is much larger. Same frame-rate independence as wind.
-        const OCEAN_SCALE_PER_SEC = 14.0;
+        // Ocean currents are slower than wind but the previous OCEAN_SCALE
+        // 14.0 made them appear ~2× faster than wind on screen — bad
+        // perceptual mismatch given currents move ~20× slower physically.
+        // Halved to 7.0; jets like the Gulf Stream and Kuroshio still
+        // read as motion, gyres feel like the slow drifts they actually
+        // are.
+        const OCEAN_SCALE_PER_SEC = 7.0;
         const oceanDt = Math.min(0.1, frameDt || 0.0167);
         const particles = oceanParticlesRef.current;
         for (let i = 0; i < particles.length; i++) {
@@ -1742,9 +1719,15 @@ function Globe({
           if (!w) continue;
           const [uu, vv] = w;
           const speed = Math.hypot(uu, vv);
-          // Skip advancing stagnant particles so they respawn elsewhere.
+          // Stagnant particles hold position but still age normally —
+          // previous version added +20 age and skipped the draw, which
+          // left dangling trail endpoints when a flow stalled briefly.
+          // Now: just don't advance, but render at last position so the
+          // visual trail stays continuous.
           if (speed < 0.02) {
-            p.age += 20;
+            if (!visibleOn(projection, p.lon, p.lat)) { p.prevX = null; p.prevY = null; continue; }
+            const pt = projection([p.lon, p.lat]);
+            if (pt) { p.prevX = pt[0]; p.prevY = pt[1]; }
             continue;
           }
           const dirX = uu / speed, dirY = vv / speed;
@@ -1759,12 +1742,15 @@ function Globe({
           const pt = projection([p.lon, p.lat]);
           if (!pt) continue;
           if (p.prevX != null && p.prevY != null) {
-            wctx.beginPath();
-            wctx.moveTo(p.prevX, p.prevY);
-            wctx.lineTo(pt[0], pt[1]);
-            wctx.strokeStyle = currentColor(speed, 0.8);
-            wctx.lineWidth = 1.1;
-            wctx.stroke();
+            const dx = pt[0] - p.prevX, dy = pt[1] - p.prevY;
+            if (dx*dx + dy*dy < TELEPORT_PX*TELEPORT_PX) {
+              wctx.beginPath();
+              wctx.moveTo(p.prevX, p.prevY);
+              wctx.lineTo(pt[0], pt[1]);
+              wctx.strokeStyle = currentColor(speed, 0.8);
+              wctx.lineWidth = 1.1;
+              wctx.stroke();
+            }
           }
           p.prevX = pt[0]; p.prevY = pt[1];
         }
