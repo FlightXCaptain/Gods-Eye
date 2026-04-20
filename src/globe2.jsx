@@ -645,6 +645,17 @@ function Globe({
   // velocity in km/h but no heading, so we infer both from position
   // delta between successive polls.
   const issStateRef    = useRef(null);
+  // Latest-value refs for props that churn every tick (SSE snapshots,
+  // time cursor, focus target). Reading these inside the frame loop
+  // instead of closing over the prop values means we can keep them
+  // OUT of the main useEffect's dep array — so the RAF / event
+  // handler setup doesn't tear down and rebuild every time flights
+  // update (several times per second) or the clock ticks. Synced
+  // via a tiny dedicated effect below. This is the single biggest
+  // perf win on the globe render path.
+  const dataRef        = useRef(data);
+  const nowCursorRef   = useRef(nowCursor);
+  const focusTargetRef = useRef(focusTarget);
   // Base canvas redraw throttle. During idle auto-rotate we'd otherwise be
   // reparsing country / state / river / lake features 60×/sec; cap to ~30fps.
   const lastBaseRedrawMsRef = useRef(0);
@@ -675,6 +686,13 @@ function Globe({
       targetScaleRef.current = Math.min(width, height) / 2.1;
     }
   }, [zoomOutSignal, width, height]);
+
+  // Keep the latest-value refs in sync with their props. Touching the
+  // base dirty flag on data/nowCursor change ensures we repaint with
+  // the new values even without a full effect remount.
+  useEffect(() => { dataRef.current = data;           dirtyBase.current = true; }, [data]);
+  useEffect(() => { nowCursorRef.current = nowCursor; dirtyBase.current = true; }, [nowCursor]);
+  useEffect(() => { focusTargetRef.current = focusTarget; }, [focusTarget]);
 
   // Rebuild the altitude-sorted flight array only when data.flights changes.
   useEffect(() => {
@@ -1434,6 +1452,17 @@ function Globe({
         lastMoveTs = 0;
 
     const tick = () => {
+      // Pick up the latest values of frequently-changing props without
+      // relying on them being in the enclosing useEffect's dep array.
+      // See the comment where `dataRef` / `nowCursorRef` / `focusTargetRef`
+      // are declared for the why. These locals shadow the props of the
+      // same name so the rest of the (very long) tick body continues to
+      // read `data.foo`, `nowCursor`, `focusTarget` with no further
+      // changes.
+      const data        = dataRef.current;
+      const nowCursor   = nowCursorRef.current;
+      const focusTarget = focusTargetRef.current;
+
       const tickNow = performance.now();
       const frameDt = lastFrameMsRef.current ? (tickNow - lastFrameMsRef.current) / 1000 : 0;
       lastFrameMsRef.current = tickNow;
@@ -3364,7 +3393,13 @@ function Globe({
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [width, height, theme, data, projection, layers, nowCursor, animationIntensity, focusTarget]);
+    // `data`, `nowCursor`, and `focusTarget` intentionally omitted —
+    // they're read via refs inside tick() so their high update rate
+    // (SSE snapshots, 1 Hz clock, user selection) doesn't tear down
+    // the entire frame loop and re-attach the pointer/wheel handlers
+    // several times a second. That churn was the dominant cost during
+    // zoom-in interactions.
+  }, [width, height, theme, projection, layers, animationIntensity]);
 
   return (
     <div ref={wrapRef} className="grabbable select-none" style={{ position:'relative', width, height, touchAction:'none' }}>
