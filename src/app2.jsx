@@ -1238,6 +1238,22 @@ function Dossier({ item, onClose }) {
           </div>
           <KV k="Aircraft" v={item.desc || item.type || '—'}/>
           <KV k="Reg" v={item.reg || '—'}/>
+          {/* Airline lookup from callsign prefix. Static data via
+              /api/airlines — covers ~5,800 commercial + cargo carriers
+              (OpenFlights dataset). Tail numbers and MEDEVAC/LIFEGUARD
+              style free-form callsigns don't resolve; we just omit the
+              rows in that case. */}
+          {(() => {
+            const r = typeof window.resolveAirline === 'function'
+              ? window.resolveAirline(item.callsign) : null;
+            if (!r) return null;
+            return (
+              <>
+                <KV k="Operator" v={r.airline.name + (r.airline.country ? ` · ${r.airline.country}` : '')}/>
+                <KV k="Flight #" v={r.displayNumber}/>
+              </>
+            );
+          })()}
           <KV k="Altitude" v={typeof item.alt === 'number' ? `${item.alt.toLocaleString()} ft` : (item.alt || '—')}/>
           <KV k="Speed" v={item.vel ? `${Math.round(item.vel)} kt` : '—'}/>
           <KV k="Heading" v={item.hdg ? `${Math.round(item.hdg)}°` : '—'}/>
