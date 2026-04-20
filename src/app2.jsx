@@ -67,6 +67,10 @@ function Icon({ name, className='w-4 h-4' }) {
     globe: 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 0c2.5 3 4 6 4 10s-1.5 7-4 10m0-20c-2.5 3-4 6-4 10s1.5 7 4 10M2 12h20',
     zap: 'M13 3L4 14h7l-1 7 9-11h-7l1-7z',
     filter: 'M3 5h18M6 12h12M10 19h4',
+    // Newspaper — rectangle with three truncated horizontal lines, reads
+    // as article content. Used on the header button for the conflict
+    // news-feed popover.
+    newspaper: 'M4 4h16v16H4zM8 8h8M8 12h8M8 16h5',
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
@@ -781,6 +785,191 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
             )}
 
           </div>
+      )}
+    </div>
+  );
+}
+
+// CAMEO root-code metadata used by both the legend accent colour and the
+// category filter inside NewsPopover. Kept here (not inside the popover)
+// because the map's News layer also speaks CAMEO — having one source of
+// truth avoids the two drifting apart later. Dot colour tracks the
+// QuadClass scheme used in globe2.jsx's news-hotspot renderer so a dot
+// on the globe visually matches its category pill in the popover.
+const CAMEO_CONFLICT_META = [
+  // [rootCode, label, accentColor]
+  [14, 'Protest',          '#f59e0b'], // QuadClass 3 — amber
+  [15, 'Force posture',    '#ef4444'], // QuadClass 4 — red
+  [16, 'Reduce relations', '#ef4444'],
+  [17, 'Coerce',           '#ef4444'],
+  [18, 'Assault',          '#ef4444'],
+  [19, 'Fight',            '#ef4444'],
+  [20, 'Mass violence',    '#b91c1c'], // darker red — escalates severity
+];
+
+// Conflict-news feed dropdown. Sits in the header action cluster next to
+// the Layers popover and surfaces the last N hours of geocoded conflict
+// events — sorted newest-first, filterable by published-time window and
+// CAMEO category. Clicking an item focuses the globe on the event's
+// location and opens the dossier, exactly like the LiveFeed.
+//
+// Why a separate popover rather than a tab inside LiveFeed:
+//   - LiveFeed is a firehose of every layer's updates; a dedicated news
+//     surface can sort/filter by properties that don't apply to ships or
+//     aircraft (CAMEO category, mentions, tone).
+//   - Its filters are intentionally *independent* of the map's News sub-
+//     filter. The map can be showing non-conflict + conflict, the popover
+//     can still be scoped to "violent only, last hour" without moving the
+//     map — answers the question "what's happening right now?" cleanly.
+function NewsPopover({ news, onPick }) {
+  const [open, setOpen] = useState(false);
+  // Published-date window in hours. 4 h is a useful "live news feel"
+  // default — long enough to survive a quiet 15-min slot but short
+  // enough that everything visible is genuinely current. The full 8 h
+  // range is available for deeper scans.
+  const [hoursBack, setHoursBack] = useState(() => {
+    const raw = parseInt(localStorage.getItem('ge-news-hours') || '', 10);
+    return (raw === 1 || raw === 4 || raw === 8) ? raw : 4;
+  });
+  useEffect(() => { localStorage.setItem('ge-news-hours', String(hoursBack)); }, [hoursBack]);
+
+  // Category filter per CAMEO root code. Default: all seven conflict
+  // categories on. Persisted so a user who only cares about fights and
+  // mass violence doesn't have to re-click them every session.
+  const [catFilter, setCatFilter] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ge-news-cats')) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    const def = Object.fromEntries(CAMEO_CONFLICT_META.map(([c]) => [c, true]));
+    const merged = { ...def, ...catFilter };
+    if (JSON.stringify(merged) !== JSON.stringify(catFilter)) setCatFilter(merged);
+    localStorage.setItem('ge-news-cats', JSON.stringify(merged));
+  }, [catFilter]);
+
+  // Outside-click dismissal (same pattern as LayersPopover — avoids a
+  // full-screen backdrop div which would eat globe interaction).
+  const rootRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
+  }, [open]);
+
+  // Filtering + sort. Memoised so a typing user doesn't re-sort 1000
+  // items every keystroke elsewhere in the app.
+  const items = useMemo(() => {
+    if (!Array.isArray(news)) return [];
+    const cutoff = Date.now() - hoursBack * 60 * 60 * 1000;
+    return news
+      .filter(n => n.conflict
+                && (n.time || 0) >= cutoff
+                && catFilter[n.rootCode] !== false)
+      .sort((a, b) => (b.time || 0) - (a.time || 0))
+      // Cap at 200 — the DOM isn't virtualised, and more than that is
+      // never useful in a skim-focused popover.
+      .slice(0, 200);
+  }, [news, hoursBack, catFilter]);
+
+  // How many conflict events exist in the current window before category
+  // filtering, so the header badge reflects total availability rather
+  // than just the filtered subset (useful for "is my category filter too
+  // narrow?" gut checks).
+  const windowTotal = useMemo(() => {
+    if (!Array.isArray(news)) return 0;
+    const cutoff = Date.now() - hoursBack * 60 * 60 * 1000;
+    return news.filter(n => n.conflict && (n.time || 0) >= cutoff).length;
+  }, [news, hoursBack]);
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <IconBtn onClick={()=>setOpen(o=>!o)} active={open} title="Conflict news feed">
+        <Icon name="newspaper" />
+      </IconBtn>
+      {open && (
+        <div className="absolute z-50 top-12 right-0 w-[min(92vw,380px)] max-h-[75vh] glass-strong rounded-2xl p-3 flex flex-col overflow-hidden">
+          {/* Header: title + live count */}
+          <div className="flex items-center justify-between mb-2 shrink-0">
+            <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">
+              Conflict news
+            </div>
+            <div className="text-[10px] font-mono tabular-nums opacity-50">
+              {items.length}{items.length !== windowTotal ? ` / ${windowTotal}` : ''}
+            </div>
+          </div>
+
+          {/* Published-time window pills */}
+          <div className="flex gap-1 mb-2 shrink-0">
+            {[1, 4, 8].map(h => (
+              <button key={h}
+                onClick={() => setHoursBack(h)}
+                className={classNames(
+                  'flex-1 px-2 py-1 rounded-md text-[10px] font-mono uppercase tracking-wider transition',
+                  hoursBack === h
+                    ? 'bg-accent-500 text-white shadow'
+                    : 'bg-black/5 dark:bg-white/5 opacity-60 hover:opacity-100'
+                )}>
+                {h}h
+              </button>
+            ))}
+          </div>
+
+          {/* Category checkboxes — always open (no collapse chevron). The
+              list is short enough (7 items) that hiding them behind an
+              interaction costs more than it's worth. */}
+          <div className="mb-2 pb-2 border-b border-black/5 dark:border-white/5 shrink-0">
+            <div className="text-[9px] uppercase font-mono opacity-40 tracking-wider mb-1">Categories (CAMEO)</div>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+              {CAMEO_CONFLICT_META.map(([code, label, col]) => (
+                <label key={code} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                  <input type="checkbox"
+                    checked={catFilter[code] !== false}
+                    onChange={e => setCatFilter(f => ({ ...f, [code]: e.target.checked }))}
+                    className="accent-accent-500 scale-90"/>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={{ background: col }}/>
+                  <span className="opacity-80 truncate">{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Scrollable item list */}
+          <div className="flex-1 overflow-y-auto scroll -mx-1">
+            {items.length === 0 && (
+              <div className="px-3 py-8 text-center text-[11px] opacity-40 font-mono">
+                {windowTotal === 0
+                  ? `no conflict events in the last ${hoursBack}h`
+                  : 'all categories filtered out'}
+              </div>
+            )}
+            {items.map((n) => {
+              const accent = CAMEO_CONFLICT_META.find(([c]) => c === n.rootCode)?.[2] || '#ef4444';
+              return (
+                <button key={n.id}
+                  onClick={() => { onPick?.(n); setOpen(false); }}
+                  className="w-full text-left flex items-start gap-2 px-2 py-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition border-b border-black/5 dark:border-white/5 last:border-b-0">
+                  <div className="shrink-0 w-1.5 h-1.5 rounded-full mt-1.5" style={{ background: accent }}/>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] leading-snug line-clamp-2">
+                      {n.summary || n.place || n.rootName || 'News event'}
+                    </div>
+                    <div className="text-[10px] opacity-55 font-mono truncate mt-0.5 flex gap-2 items-center">
+                      <span>{fmtAgo(n.time)}</span>
+                      {n.mentions != null && n.mentions > 1 && <span>· {n.mentions}×</span>}
+                      {n.sourceDomain && <span className="truncate">· {n.sourceDomain}</span>}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1756,6 +1945,22 @@ function App() {
   const [picked, setPicked] = useState(null);
   const [focusTarget, setFocusTarget] = useState(null);
 
+  // Click handler for items in the NewsPopover dropdown. Focuses the
+  // globe on the event's geocoded location and opens the dossier. Zoom
+  // 3 is a city-level preset that matches GDELT's ActionGeo resolution
+  // — enough to place a pin without over-committing, since most events
+  // are recorded at city accuracy rather than street level.
+  const pickNewsItem = useCallback((n) => {
+    if (!n || !isFinite(n.lon) || !isFinite(n.lat)) return;
+    setFocusTarget({
+      type: 'news',
+      label: n.summary || n.place || 'News event',
+      coords: [n.lon, n.lat],
+      zoom: 3,
+    });
+    setPicked({ ...n, _layer: 'news' });
+  }, []);
+
   // Time cursor
   const [nowCursor, setNowCursor] = useState(Date.now());
   const [playing, setPlaying] = useState(false);
@@ -2150,6 +2355,10 @@ function App() {
             newsFilters={newsFilters} setNewsFilters={setNewsFilters}
   flightFilters={flightFilters} setFlightFilters={setFlightFilters}
   dcFilters={dcFilters} setDcFilters={setDcFilters}/>
+            {/* Conflict news-feed dropdown. Feeds off data.news (raw,
+                pre–map-filter) so its filtering is independent of the
+                main layer's sub-toggles. */}
+            <NewsPopover news={data.news} onPick={pickNewsItem}/>
             <button
               onClick={() => toggleAutoRotate()}
               title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
@@ -2183,6 +2392,7 @@ function App() {
             newsFilters={newsFilters} setNewsFilters={setNewsFilters}
   flightFilters={flightFilters} setFlightFilters={setFlightFilters}
   dcFilters={dcFilters} setDcFilters={setDcFilters}/>
+          <NewsPopover news={data.news} onPick={pickNewsItem}/>
           <button
             onClick={() => toggleAutoRotate()}
             title={autoRotate ? 'Auto-rotate on (click to disable)' : 'Auto-rotate off (click to enable)'}
