@@ -2238,6 +2238,32 @@ function Globe({
         octx.restore();
       }
 
+      // LNG terminals (curated list, ~35 entries). Small dataset — no
+      // LOD clustering needed. Rendered as small ice-blue diamonds to
+      // visually distinguish from refinery circles and fab squares.
+      if (layers.infrastructure && layers.lng && Array.isArray(data.lng) && data.lng.length) {
+        octx.save();
+        octx.fillStyle = '#93c5fdee';
+        octx.strokeStyle = '#dbeafe';
+        octx.lineWidth = 0.8;
+        for (const t of data.lng) {
+          if (!visibleOn(projection, t.lon, t.lat)) continue;
+          const pt = projection([t.lon, t.lat]); if (!pt) continue;
+          // Diamond (45° rotated square).
+          const s = 3.2;
+          octx.beginPath();
+          octx.moveTo(pt[0], pt[1] - s);
+          octx.lineTo(pt[0] + s, pt[1]);
+          octx.lineTo(pt[0], pt[1] + s);
+          octx.lineTo(pt[0] - s, pt[1]);
+          octx.closePath();
+          octx.fill();
+          octx.stroke();
+          pushHit(pt[0], pt[1], 6, 'lng', t);
+        }
+        octx.restore();
+      }
+
       // GDELT news hotspots. Each event is a single geocoded news
       // article cluster, colored by CAMEO QuadClass (1=verbal coop
       // green, 2=material coop sky, 3=verbal conflict amber, 4=material
@@ -3147,6 +3173,9 @@ function Globe({
           )}
           {hover._layer === 'refinery' && (
             <span>{hover.name}{hover.operator ? ` · ${hover.operator}` : ''}{hover.capacity_bpd ? ` · ${Math.round(hover.capacity_bpd).toLocaleString()} bpd` : ''}</span>
+          )}
+          {hover._layer === 'lng' && (
+            <span>{hover.name}{hover.type ? ` · ${hover.type}` : ''}{hover.capacity_mtpa ? ` · ${hover.capacity_mtpa} mtpa` : ''}</span>
           )}
           {hover._layer === 'news' && (
             <span>{hover.place || 'Unlocated'} · {hover.mentions || 1}× mentions · tone {hover.tone?.toFixed?.(1) || 0}</span>
