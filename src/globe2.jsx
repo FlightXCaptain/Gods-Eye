@@ -724,6 +724,22 @@ function Globe({
   const dataRef        = useRef(data);
   const nowCursorRef   = useRef(nowCursor);
   const focusTargetRef = useRef(focusTarget);
+  // autoRotate has never been in the main frame-loop useEffect's dep
+  // array. Before PR #104 that was harmless because `data` churning in
+  // the deps forced a remount several times a second, incidentally
+  // recapturing the latest autoRotate closure. Moving `data` out of
+  // those deps killed that incidental recapture — leaving tick() stuck
+  // seeing `autoRotate = true` forever, so the auto-rotate branch kept
+  // overwriting targetRotRef every frame. That made panning and
+  // zoom-out feel broken (the drag target got clobbered; the wheel's
+  // call to stopAutoRotate had no effect on the rendered state).
+  // Mirroring it via a ref fixes it without adding a remount trigger.
+  const autoRotateRef  = useRef(autoRotate);
+  // Same class as autoRotate — dcFilters is used inside the frame loop
+  // to filter datacenter dots, toggled from the UI. Not frequent, but
+  // it was never in the main effect's dep array either, so its closure
+  // capture was stale any time the effect didn't happen to remount.
+  const dcFiltersRef   = useRef(dcFilters);
   // Base canvas redraw throttle. During idle auto-rotate we'd otherwise be
   // reparsing country / state / river / lake features 60×/sec; cap to ~30fps.
   const lastBaseRedrawMsRef = useRef(0);
@@ -761,6 +777,8 @@ function Globe({
   useEffect(() => { dataRef.current = data;           dirtyBase.current = true; }, [data]);
   useEffect(() => { nowCursorRef.current = nowCursor; dirtyBase.current = true; }, [nowCursor]);
   useEffect(() => { focusTargetRef.current = focusTarget; }, [focusTarget]);
+  useEffect(() => { autoRotateRef.current = autoRotate; }, [autoRotate]);
+  useEffect(() => { dcFiltersRef.current = dcFilters; dirtyBase.current = true; }, [dcFilters]);
 
   // Rebuild the altitude-sorted flight array only when data.flights changes.
   useEffect(() => {
@@ -1530,6 +1548,8 @@ function Globe({
       const data        = dataRef.current;
       const nowCursor   = nowCursorRef.current;
       const focusTarget = focusTargetRef.current;
+      const autoRotate  = autoRotateRef.current;
+      const dcFilters   = dcFiltersRef.current;
 
       const tickNow = performance.now();
       const frameDt = lastFrameMsRef.current ? (tickNow - lastFrameMsRef.current) / 1000 : 0;
