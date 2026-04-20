@@ -332,6 +332,10 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                          newsFilters, setNewsFilters,
                          dcFilters, setDcFilters }) {
   const [open, setOpen] = useState(false);
+  // Expand/collapse for the Critical Infrastructure sub-panel. Independent
+  // of `open` (popover visibility) and of `layers.infrastructure` (master
+  // gate) — users can inspect sub-options before enabling the parent.
+  const [infraExpanded, setInfraExpanded] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
     ['ships','Ships',     'ship',    '#22d3ee'],
