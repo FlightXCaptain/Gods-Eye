@@ -84,4 +84,67 @@
     const r = window.resolveAirline(callsign);
     return r?.airline?.name || null;
   };
+
+  // Async fallback. The OpenFlights dataset we ship misses some ~6% of
+  // observed callsigns (regional carriers like Endeavor / CommuteAir,
+  // newer operators, some military ICAO designators). On a miss we hit
+  // /api/airline which layers an ADSBdb lookup on top of the same local
+  // JSON — if ADSBdb knows the ICAO, the server returns it. The
+  // fetched record is merged into our in-memory AIRLINES map so every
+  // subsequent `resolveAirline` call for the same ICAO hits synchronously.
+  //
+  // Separate INFLIGHT + MISSED sets prevent re-fetching: if we've
+  // already asked once and it failed, don't pester the network every
+  // frame for the same unknown ICAO.
+  const INFLIGHT = new Map();   // icao → Promise<entry | null>
+  const MISSED   = new Set();   // icao → confirmed not in ADSBdb either
+
+  function parseIcaoFromCallsign(cs) {
+    if (!cs) return null;
+    const s = String(cs).trim().toUpperCase();
+    const m = s.match(/^([A-Z]{3})(\d+[A-Z0-9]*)$/);
+    return m ? m[1] : null;
+  }
+
+  async function fetchIcao(icao) {
+    if (!icao) return null;
+    if (!AIRLINES) await load();
+    if (AIRLINES[icao]) return AIRLINES[icao];
+    if (MISSED.has(icao)) return null;
+    if (INFLIGHT.has(icao)) return INFLIGHT.get(icao);
+
+    const p = (async () => {
+      try {
+        const r = await fetch(`/api/airline?icao=${encodeURIComponent(icao)}`);
+        if (!r.ok) { MISSED.add(icao); return null; }
+        const j = await r.json();
+        if (!j?.name) { MISSED.add(icao); return null; }
+        const entry = {
+          name:     j.name,
+          iata:     j.iata || null,
+          callsign: j.callsign || null,
+          country:  j.country || null,
+        };
+        AIRLINES[icao] = entry;
+        return entry;
+      } catch {
+        // Network error — don't negative-cache; let next call retry.
+        return null;
+      } finally {
+        INFLIGHT.delete(icao);
+      }
+    })();
+    INFLIGHT.set(icao, p);
+    return p;
+  }
+
+  // Kick off an async populate for a callsign's ICAO. Returns a
+  // promise that resolves when the airline is cached in the local map
+  // (or null if we still can't find it). Safe to call repeatedly for
+  // the same callsign — dedups in-flight requests.
+  window.warmAirline = (callsign) => {
+    const icao = parseIcaoFromCallsign(callsign);
+    if (!icao) return Promise.resolve(null);
+    return fetchIcao(icao);
+  };
 })();

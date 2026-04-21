@@ -1260,22 +1260,7 @@ function Dossier({ item, onClose }) {
           </div>
           <KV k="Aircraft" v={item.desc || item.type || '—'}/>
           <KV k="Reg" v={item.reg || '—'}/>
-          {/* Airline lookup from callsign prefix. Static data via
-              /api/airlines — covers ~5,800 commercial + cargo carriers
-              (OpenFlights dataset). Tail numbers and MEDEVAC/LIFEGUARD
-              style free-form callsigns don't resolve; we just omit the
-              rows in that case. */}
-          {(() => {
-            const r = typeof window.resolveAirline === 'function'
-              ? window.resolveAirline(item.callsign) : null;
-            if (!r) return null;
-            return (
-              <>
-                <KV k="Operator" v={r.airline.name + (r.airline.country ? ` · ${r.airline.country}` : '')}/>
-                <KV k="Flight #" v={r.displayNumber}/>
-              </>
-            );
-          })()}
+          <AirlineInfo callsign={item.callsign} mil={item.mil}/>
           <KV k="Altitude" v={typeof item.alt === 'number' ? `${item.alt.toLocaleString()} ft` : (item.alt || '—')}/>
           <KV k="Speed" v={item.vel ? `${Math.round(item.vel)} kt` : '—'}/>
           <KV k="Heading" v={item.hdg ? `${Math.round(item.hdg)}°` : '—'}/>
@@ -1558,6 +1543,53 @@ function KV({ k, v }) {
       <span className="text-sm font-mono">{v}</span>
     </div>
   );
+}
+
+// Operator + flight-number row for the flight dossier. Resolves the
+// airline from the callsign's 3-letter ICAO prefix:
+//
+//   1. Synchronous first — hits the static OpenFlights dataset
+//      (`window.resolveAirline`) which ships baked into the page and
+//      covers ~80% of observed callsigns.
+//   2. If the ICAO isn't in that static set (regional carriers,
+//      newer operators, some military units), asynchronously fetch
+//      `/api/airline?icao=…` which falls back to ADSBdb. That warms
+//      the in-memory map so the re-render then hits synchronously.
+//   3. For aircraft tagged `mil` whose callsign still doesn't
+//      resolve (tactical callsigns like KING99, REACH12 that aren't
+//      airline designators), show "Military" so the user sees *some*
+//      operator info rather than a blank.
+//
+// Private GA / tail-number callsigns (N12345 / G-ABCD / etc.) don't
+// match the ICAO pattern at all and correctly render nothing here.
+function AirlineInfo({ callsign, mil }) {
+  const resolve = () => (typeof window.resolveAirline === 'function')
+    ? window.resolveAirline(callsign) : null;
+  const [r, setR] = useState(resolve);
+  useEffect(() => {
+    setR(resolve());
+    if (!callsign || typeof window.warmAirline !== 'function') return;
+    let cancel = false;
+    window.warmAirline(callsign).then(() => {
+      if (cancel) return;
+      const next = resolve();
+      if (next) setR(next);
+    });
+    return () => { cancel = true; };
+  }, [callsign]);
+
+  if (r) {
+    return (
+      <>
+        <KV k="Operator" v={r.airline.name + (r.airline.country ? ` · ${r.airline.country}` : '')}/>
+        <KV k="Flight #" v={r.displayNumber}/>
+      </>
+    );
+  }
+  if (mil) {
+    return <KV k="Operator" v="Military"/>;
+  }
+  return null;
 }
 
 // Async-fetches the scheduled origin+destination for a callsign and
