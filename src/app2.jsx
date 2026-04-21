@@ -1280,7 +1280,7 @@ function Dossier({ item, onClose }) {
               Source · ADSBx {item.source === 'adsbx-ocean' ? '(ocean)' : ''}
             </div>
           )}
-          <FlightRouteInfo callsign={item.callsign}/>
+          <FlightRouteInfo callsign={item.callsign} mil={item.mil}/>
         </>}
         {layer === 'ship' && <>
           <div className="text-lg">{item.name || `MMSI ${item.mmsi}`}</div>
@@ -1643,40 +1643,76 @@ function AirlineInfo({ callsign, mil, hex }) {
 }
 
 // Async-fetches the scheduled origin+destination for a callsign and
-// renders them in the dossier. Returns null while loading or when no
-// route record exists (callsign not in ADSBdb — typical for ferry /
-// charter / private / military). See api/flight-route.js for the
-// server side which queries ADSBdb.
-function FlightRouteInfo({ callsign }) {
-  const [route, setRoute] = useState(null);
+// renders them in the dossier. Three outcomes:
+//
+//   1. Route found → full From / To / Distance block (the common case
+//      for scheduled commercial + cargo + ICAO-format military).
+//   2. Route not found AND aircraft is military → a short "route not
+//      published" hint explaining the gap, since tactical military
+//      callsigns (KING99, REACH12, SPAR06, etc.) intentionally don't
+//      publish flight plans to public databases. The user otherwise
+//      wonders if it's a bug.
+//   3. Route not found and not military → render nothing (expected
+//      for private GA / ferry / repositioning flights where a public
+//      route doesn't exist either).
+//
+// Tracks a discrete `fetched` flag so the "not published" hint only
+// appears after the request settles — we don't want to flash it for
+// the split-second between click and response.
+function FlightRouteInfo({ callsign, mil }) {
+  const [route, setRoute]     = useState(null);
+  const [fetched, setFetched] = useState(false);
   useEffect(() => {
-    if (!callsign || typeof window.getFlightRoute !== 'function') return;
+    setRoute(null);
+    setFetched(false);
+    if (!callsign || typeof window.getFlightRoute !== 'function') {
+      setFetched(true);
+      return;
+    }
     let cancel = false;
-    window.getFlightRoute(callsign).then((r) => { if (!cancel) setRoute(r); }).catch(() => {});
+    window.getFlightRoute(callsign).then((r) => {
+      if (cancel) return;
+      setRoute(r);
+      setFetched(true);
+    }).catch(() => { if (!cancel) setFetched(true); });
     return () => { cancel = true; };
   }, [callsign]);
-  if (!route || !route.dep || !route.arr) return null;
-  const depCode = route.dep.iata || route.dep.icao;
-  const arrCode = route.arr.iata || route.arr.icao;
-  const depLabel = `${depCode} · ${route.dep.name}`;
-  const arrLabel = `${arrCode} · ${route.arr.name}`;
-  // Great-circle distance between the two airports. Route-length readout
-  // — the actual flight path deviates slightly due to wind routing /
-  // airways, but this is the right order of magnitude.
-  const toRad = (d) => d * Math.PI / 180;
-  const lat1 = toRad(route.dep.lat), lat2 = toRad(route.arr.lat);
-  const dLat = lat2 - lat1;
-  const dLon = toRad(route.arr.lon - route.dep.lon);
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
-  const km = Math.round(2 * 6371 * Math.asin(Math.sqrt(a)));
-  return (
-    <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1">
-      <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Route · ADSBdb</div>
-      <KV k="From" v={depLabel}/>
-      <KV k="To" v={arrLabel}/>
-      <KV k="Distance" v={`~${km.toLocaleString()} km`}/>
-    </div>
-  );
+
+  if (route && route.dep && route.arr) {
+    const depCode = route.dep.iata || route.dep.icao;
+    const arrCode = route.arr.iata || route.arr.icao;
+    const depLabel = `${depCode} · ${route.dep.name}`;
+    const arrLabel = `${arrCode} · ${route.arr.name}`;
+    // Great-circle distance between the two airports. Route-length readout
+    // — the actual flight path deviates slightly due to wind routing /
+    // airways, but this is the right order of magnitude.
+    const toRad = (d) => d * Math.PI / 180;
+    const lat1 = toRad(route.dep.lat), lat2 = toRad(route.arr.lat);
+    const dLat = lat2 - lat1;
+    const dLon = toRad(route.arr.lon - route.dep.lon);
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+    const km = Math.round(2 * 6371 * Math.asin(Math.sqrt(a)));
+    return (
+      <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1">
+        <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Route · ADSBdb</div>
+        <KV k="From" v={depLabel}/>
+        <KV k="To" v={arrLabel}/>
+        <KV k="Distance" v={`~${km.toLocaleString()} km`}/>
+      </div>
+    );
+  }
+
+  // Fetch settled but no route. For military flights this is usually
+  // by design — show that we tried so it doesn't look like a bug.
+  if (fetched && mil) {
+    return (
+      <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1">
+        <div className="text-[10px] uppercase font-mono opacity-50 tracking-wider">Route · ADSBdb</div>
+        <div className="text-[11px] opacity-60 italic">Not published — tactical callsigns aren't in the public flight-plan database.</div>
+      </div>
+    );
+  }
+  return null;
 }
 
 // Async-renders the IndexedDB history stats for a given MMSI. Shows up to
