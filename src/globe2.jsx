@@ -1010,9 +1010,17 @@ function Globe({
       }).catch(e => console.warn('land-50m fail', e));
 
       // Countries — drawing uses topojson mesh (efficient dashed borders).
+      // Also expose full country polygons on window for other components
+      // (e.g. app2.jsx military-bases country filter) to do point-in-polygon.
       try {
         const c = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json');
         countriesRef.current = topojson.mesh(c, c.objects.countries, (a, b) => a !== b);
+        // Feature collection with per-country Polygon/MultiPolygon geometries.
+        // Computed bboxes cached alongside for fast point-in-polygon prefilter.
+        const fc = topojson.feature(c, c.objects.countries);
+        const feats = fc.features.map(f => ({ ...f, _bbox: d3.geoBounds(f) }));
+        window.countryPolygonFeatures = feats;
+        window.dispatchEvent(new CustomEvent('ge-countries-ready'));
         dirtyBase.current = true;
       } catch (e) { console.warn('countries topo fail', e); }
 
