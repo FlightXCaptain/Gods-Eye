@@ -48,6 +48,15 @@ export async function loadOverpassDataset(ds) {
       if (!r.ok) { lastErr = new Error(`overpass ${endpoint} ${r.status}`); continue; }
       const j = await r.json();
       const elements = j.elements || [];
+      // Overpass returns 200 with `"remark": "query timed out..."` and
+      // an empty elements array when its internal timeout fires. Detect
+      // and treat as an error so we don't cache the empty result for the
+      // full 7-day TTL (making the layer look permanently broken until
+      // the next deploy flushes the module cache).
+      if (elements.length === 0 && j.remark) {
+        lastErr = new Error(`overpass ${endpoint} remark: ${String(j.remark).slice(0, 200)}`);
+        continue;
+      }
       const out = [];
       for (const el of elements) {
         // Nodes have lat/lon directly; ways/relations with `out center` have
@@ -58,7 +67,11 @@ export async function loadOverpassDataset(ds) {
         const proj = ds.project({ type: el.type, id: el.id, tags: el.tags || {}, lat, lon });
         if (proj != null) out.push(proj);
       }
-      cache.set(ds.id, { data: out, at: now });
+      // Only cache non-empty results. An empty result after projection
+      // usually means the upstream returned nothing useful (rate-limit
+      // soft failure, or the query genuinely matches nothing — either
+      // way, better to let the next request retry than freeze the layer).
+      if (out.length > 0) cache.set(ds.id, { data: out, at: now });
       return out;
     } catch (e) {
       lastErr = e;
