@@ -1271,7 +1271,7 @@ function Dossier({ item, onClose }) {
           </div>
           <KV k="Aircraft" v={item.desc || item.type || '—'}/>
           <KV k="Reg" v={item.reg || '—'}/>
-          <AirlineInfo callsign={item.callsign} mil={item.mil}/>
+          <AirlineInfo callsign={item.callsign} mil={item.mil} hex={item.id}/>
           <KV k="Altitude" v={typeof item.alt === 'number' ? `${item.alt.toLocaleString()} ft` : (item.alt || '—')}/>
           <KV k="Speed" v={item.vel ? `${Math.round(item.vel)} kt` : '—'}/>
           <KV k="Heading" v={item.hdg ? `${Math.round(item.hdg)}°` : '—'}/>
@@ -1564,46 +1564,77 @@ function KV({ k, v }) {
   );
 }
 
-// Operator + flight-number row for the flight dossier. Resolves the
-// airline from the callsign's 3-letter ICAO prefix:
+// Operator + flight-number row for the flight dossier. Three-tier
+// resolution, fast → slow:
 //
-//   1. Synchronous first — hits the static OpenFlights dataset
-//      (`window.resolveAirline`) which ships baked into the page and
-//      covers ~80% of observed callsigns.
-//   2. If the ICAO isn't in that static set (regional carriers,
-//      newer operators, some military units), asynchronously fetch
-//      `/api/airline?icao=…` which falls back to ADSBdb. That warms
-//      the in-memory map so the re-render then hits synchronously.
-//   3. For aircraft tagged `mil` whose callsign still doesn't
-//      resolve (tactical callsigns like KING99, REACH12 that aren't
-//      airline designators), show "Military" so the user sees *some*
-//      operator info rather than a blank.
+//   1. Sync airline lookup against the bundled OpenFlights dataset
+//      via `window.resolveAirline(callsign)`. Instant, covers ~80%
+//      of observed callsigns (all major airlines + commercial cargo).
 //
-// Private GA / tail-number callsigns (N12345 / G-ABCD / etc.) don't
-// match the ICAO pattern at all and correctly render nothing here.
-function AirlineInfo({ callsign, mil }) {
+//   2. Async airline fallback via `/api/airline?icao=…` which layers
+//      ADSBdb on top of the local JSON. Covers most of the remaining
+//      regional / newer operators the bundled set misses (Endeavor,
+//      CommuteAir, Mexicana, plus some military ICAOs like RCH, RFR,
+//      RRR, PAT). Once fetched, the entry is written into the local
+//      map so subsequent clicks on the same airline resolve
+//      synchronously.
+//
+//   3. Async owner lookup by ICAO24 hex via `/api/aircraft?hex=…`.
+//      This catches the long tail — military aircraft with tactical
+//      callsigns (KING99, REACH12, LAGR7 etc.) that have no airline
+//      designator at all. ADSBdb's aircraft DB returns the
+//      *registered owner* (US Air Force, US Coast Guard, US Army,
+//      etc.) regardless of what callsign the plane is broadcasting.
+//
+//   4. If all three paths fail and the aircraft is tagged `mil`,
+//      render "Military" as a meaningful last-resort label. Private
+//      GA / tail-number callsigns (N12345 / G-ABCD) that exhaust
+//      these paths simply render nothing — there's no operator to
+//      show.
+function AirlineInfo({ callsign, mil, hex }) {
   const resolve = () => (typeof window.resolveAirline === 'function')
     ? window.resolveAirline(callsign) : null;
-  const [r, setR] = useState(resolve);
+  const [airline, setAirline] = useState(resolve);
+  const [owner, setOwner]     = useState(null);
   useEffect(() => {
-    setR(resolve());
-    if (!callsign || typeof window.warmAirline !== 'function') return;
-    let cancel = false;
-    window.warmAirline(callsign).then(() => {
-      if (cancel) return;
-      const next = resolve();
-      if (next) setR(next);
-    });
-    return () => { cancel = true; };
-  }, [callsign]);
+    const initial = resolve();
+    setAirline(initial);
+    setOwner(null);
+    if (initial) return;   // tier-1 hit, done
 
-  if (r) {
+    let cancel = false;
+    (async () => {
+      // Tier 2: airline ICAO fallback.
+      if (callsign && typeof window.warmAirline === 'function') {
+        await window.warmAirline(callsign);
+        if (cancel) return;
+        const next = resolve();
+        if (next) { setAirline(next); return; }
+      }
+      // Tier 3: hex-based aircraft owner fallback. Gets us military
+      // units + some corporate operators for tactical / tail-number
+      // callsigns.
+      if (!hex) return;
+      try {
+        const res = await fetch(`/api/aircraft?hex=${encodeURIComponent(hex)}`);
+        if (cancel || !res.ok) return;
+        const j = await res.json();
+        if (j?.owner) setOwner(j);
+      } catch { /* silent — fall through to MIL / nothing */ }
+    })();
+    return () => { cancel = true; };
+  }, [callsign, hex]);
+
+  if (airline) {
     return (
       <>
-        <KV k="Operator" v={r.airline.name + (r.airline.country ? ` · ${r.airline.country}` : '')}/>
-        <KV k="Flight #" v={r.displayNumber}/>
+        <KV k="Operator" v={airline.airline.name + (airline.airline.country ? ` · ${airline.airline.country}` : '')}/>
+        <KV k="Flight #" v={airline.displayNumber}/>
       </>
     );
+  }
+  if (owner) {
+    return <KV k="Operator" v={owner.owner + (owner.country ? ` · ${owner.country}` : '')}/>;
   }
   if (mil) {
     return <KV k="Operator" v="Military"/>;
