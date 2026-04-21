@@ -474,6 +474,34 @@ function iconCement(ctx, cx, cy, size, color) {
   ctx.stroke();
 }
 
+// Military — shield silhouette with a small inner cross. Reads as
+// "military installation" at 7–8 px, visually distinct from industrial
+// icons and from city stars.
+function iconMilitary(ctx, cx, cy, size, color) {
+  const w = size * 0.9;
+  const h = size * 1.05;
+  ctx.fillStyle = color + 'aa';
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(cx - w / 2, cy - h / 2);
+  ctx.lineTo(cx + w / 2, cy - h / 2);
+  ctx.lineTo(cx + w / 2, cy + h * 0.1);
+  ctx.quadraticCurveTo(cx + w / 3, cy + h / 2, cx, cy + h / 2);
+  ctx.quadraticCurveTo(cx - w / 3, cy + h / 2, cx - w / 2, cy + h * 0.1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.0;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - h * 0.2);
+  ctx.lineTo(cx, cy + h * 0.15);
+  ctx.moveTo(cx - w * 0.25, cy - h * 0.05);
+  ctx.lineTo(cx + w * 0.25, cy - h * 0.05);
+  ctx.stroke();
+}
+
 // Port — classic anchor silhouette (ring + shaft + cross bar + flukes).
 function iconPort(ctx, cx, cy, size, color) {
   const r = size * 0.5;
@@ -2739,6 +2767,28 @@ function Globe({
         octx.restore();
       }
 
+      // Military bases (OSM Overpass, ~7k named installations globally
+      // across base / airfield / naval_base / barracks tags). Top-level
+      // layer — not gated on layers.infrastructure because installations
+      // aren't civilian infrastructure. Aggressive LOD cell-dedup at low
+      // zoom because dense NATO regions (Germany, UK, US East Coast)
+      // would otherwise blob.
+      if (layers.military && Array.isArray(data.military) && data.military.length) {
+        const cellDeg = zoom >= 4 ? 0 : zoom >= 3 ? 0.3 : zoom >= 2 ? 0.8 : 2.0;
+        const cell = new Map();
+        for (const m of data.military) {
+          if (!visibleOn(projection, m.lon, m.lat)) continue;
+          if (cellDeg === 0) { cell.set(m.id, m); continue; }
+          const key = Math.round(m.lon / cellDeg) + '|' + Math.round(m.lat / cellDeg);
+          if (!cell.has(key)) cell.set(key, m);
+        }
+        for (const m of cell.values()) {
+          const pt = projection([m.lon, m.lat]); if (!pt) continue;
+          iconMilitary(octx, pt[0], pt[1], 7, '#65a30d');
+          pushHit(pt[0], pt[1], 8, 'military', m);
+        }
+      }
+
       // GDELT news hotspots. Each event is a single geocoded news
       // article cluster, colored by CAMEO QuadClass (1=verbal coop
       // green, 2=material coop sky, 3=verbal conflict amber, 4=material
@@ -3696,6 +3746,9 @@ function Globe({
           )}
           {hover._layer === 'cement' && (
             <span>{hover.name}{hover.operator ? ` · ${hover.operator}` : ''}{hover.country ? ` · ${hover.country}` : ''}</span>
+          )}
+          {hover._layer === 'military' && (
+            <span>{hover.name}{hover.kind ? ` · ${hover.kind}` : ''}{hover.country ? ` · ${hover.country}` : ''}</span>
           )}
           {hover._layer === 'dam' && (
             <span>{hover.name}{hover.dam_type ? ` · ${hover.dam_type.replace(/_/g, ' ')}` : ''}{hover.height_m ? ` · ${hover.height_m} m` : ''}</span>

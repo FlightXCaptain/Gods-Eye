@@ -331,6 +331,16 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
           <line x1="2" y1="19" x2="22" y2="19"/>
         </svg>
       );
+    case 'military':
+      // Military shield with inner cross — universal insignia silhouette.
+      // Reads as "military installation" at 12 px without ambiguity.
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3 L20 5 L20 13 Q20 18, 12 21 Q4 18, 4 13 L4 5 Z"/>
+          <line x1="12" y1="9" x2="12" y2="16"/>
+          <line x1="8.5" y1="12.5" x2="15.5" y2="12.5"/>
+        </svg>
+      );
     case 'fab':
       // Stylized chip: a square with four external pins per side, evoking
       // a packaged IC. Readable at 12px inside the sub-panel.
@@ -465,6 +475,7 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
     ['outages','Internet outages', 'bolt', '#ef4444'],
     ['events','Natural events', 'fire', '#ef4444'],
     ['infrastructure','Critical Infrastructure', 'infra', '#94a3b8'],
+    ['military','Military bases', 'military', '#65a30d'],
     ['news','News', 'wiki', '#ef4444'],
     ['fires','Active fire pixels', 'fire', '#fb923c'],
     ['lightning','Lightning strikes', 'bolt', '#fef08a'],
@@ -1487,6 +1498,14 @@ function Dossier({ item, onClose }) {
           <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
           <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
         </>}
+        {layer === 'military' && <>
+          <div className="text-lg">{item.name}</div>
+          <div className="text-sm opacity-70">Military {item.kind || 'installation'}{item.operator ? ` · ${item.operator}` : ''}</div>
+          {item.country && <KV k="Country" v={item.country}/>}
+          <KV k="Position" v={`${item.lat.toFixed(3)}°, ${item.lon.toFixed(3)}°`}/>
+          <div className="text-[10px] opacity-50 italic pt-1">Publicly-mapped site only; OSM coverage is skewed toward open societies.</div>
+          <a href={`https://www.openstreetmap.org/${item.id.replace(/^osm-/, '').replace(/-/, '/')}`} target="_blank" rel="noopener" className="text-xs text-accent-500 underline">OpenStreetMap →</a>
+        </>}
         {layer === 'dam' && <>
           <div className="text-lg">{item.name}</div>
           <div className="text-sm opacity-70">Dam{item.dam_type ? ` · ${item.dam_type.replace(/_/g, ' ')}` : ''}</div>
@@ -1955,7 +1974,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('ge-layers')) || {}; } catch { return {}; }
   });
   useEffect(()=>{
-    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, gasproc:false, smelters:false, mines:false, cement:false, dams:false, ports:false, pipelines:false, infrastructure:false };
+    const def = { flights:true, ships:true, sats:true, iss:true, quakes:true, events:true, aurora:true, wiki:true, daynight:true, fires:true, lightning:true, tsunamis:false, wind:false, stormTracks:true, cyclones:true, outages:true, cables:false, reactors:false, plants:false, news:false, oceanCurrents:false, datacenters:false, fabs:false, refineries:false, lng:false, gasproc:false, smelters:false, mines:false, cement:false, dams:false, ports:false, pipelines:false, infrastructure:false, military:false };
     // One-shot migration: users who had any infrastructure sub-layer enabled
     // before the parent toggle existed should have the parent auto-enabled
     // on first load of this version. Detect by: `infrastructure` key absent
@@ -2425,6 +2444,7 @@ function App() {
     if (typeof window.fetchSmelters === 'function') window.fetchSmelters().then(x => { if (alive) setData(d => ({ ...d, smelters: x })); });
     if (typeof window.fetchMines === 'function') window.fetchMines().then(x => { if (alive) setData(d => ({ ...d, mines: x })); });
     if (typeof window.fetchCementPlants === 'function') window.fetchCementPlants().then(x => { if (alive) setData(d => ({ ...d, cement: x })); });
+    if (typeof window.fetchMilitaryBases === 'function') window.fetchMilitaryBases().then(x => { if (alive) setData(d => ({ ...d, military: x })); });
     if (typeof window.fetchDams === 'function') window.fetchDams().then(x => { if (alive) setData(d => ({ ...d, dams: x })); });
     if (typeof window.fetchPortsMajor === 'function') window.fetchPortsMajor().then(x => { if (alive) setData(d => ({ ...d, ports: x })); });
     if (typeof window.fetchPipelines === 'function') window.fetchPipelines().then(x => { if (alive) setData(d => ({ ...d, pipelines: x })); });
