@@ -570,51 +570,59 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       counts, multi-select, All on / All off. Default is
                       every present country enabled so enabling the layer
                       immediately shows all bases. */}
-                  {k === 'military' && layers.military && Array.isArray(militaryCountryList) && militaryCountryList.length > 0 && (
+                  {k === 'military' && layers.military && (
                     <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-1">
-                      <input
-                        type="text"
-                        value={militaryCountrySearch || ''}
-                        onChange={e => setMilitaryCountrySearch(e.target.value)}
-                        placeholder={`Filter ${militaryCountryList.length} countries…`}
-                        className="w-full text-[11px] px-2 py-1 rounded bg-black/10 dark:bg-white/10 placeholder-black/40 dark:placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-accent-500/50"
-                      />
-                      <div className="max-h-48 overflow-y-auto scroll -mr-1 pr-1">
-                        {militaryCountryList
-                          .filter(c => !militaryCountrySearch || c.name.toLowerCase().includes(militaryCountrySearch.toLowerCase()))
-                          .map(c => (
-                            <label key={c.name} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={militaryCountryFilter[c.name] !== false}
-                                onChange={e => setMilitaryCountryFilter(x => ({ ...x, [c.name]: e.target.checked }))}
-                                className="accent-accent-500 scale-90"
-                              />
-                              <span className="opacity-80 flex-1 truncate">{c.name}</span>
-                              <span className="opacity-50 font-mono tabular-nums text-[10px]">{c.count}</span>
-                            </label>
-                          ))}
-                      </div>
-                      <div className="flex gap-1 pt-0.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const next = {};
-                            for (const c of militaryCountryList) next[c.name] = true;
-                            setMilitaryCountryFilter(next);
-                          }}
-                          className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 tracking-wider"
-                        >All on</button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const next = {};
-                            for (const c of militaryCountryList) next[c.name] = false;
-                            setMilitaryCountryFilter(next);
-                          }}
-                          className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-70 hover:opacity-100 tracking-wider"
-                        >All off</button>
-                      </div>
+                      {!Array.isArray(militaryCountryList) || militaryCountryList.length === 0 ? (
+                        <div className="text-[11px] opacity-50 italic py-1">
+                          Loading countries… (cold-start Overpass fetch can take 1–2 min)
+                        </div>
+                      ) : (
+                        <>
+                          <input
+                            type="text"
+                            value={militaryCountrySearch || ''}
+                            onChange={e => setMilitaryCountrySearch(e.target.value)}
+                            placeholder={`Filter ${militaryCountryList.length} countries…`}
+                            className="w-full text-[11px] px-2 py-1 rounded bg-black/10 dark:bg-white/10 placeholder-black/40 dark:placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-accent-500/50"
+                          />
+                          <div className="max-h-48 overflow-y-auto scroll -mr-1 pr-1">
+                            {militaryCountryList
+                              .filter(c => !militaryCountrySearch || c.name.toLowerCase().includes(militaryCountrySearch.toLowerCase()))
+                              .map(c => (
+                                <label key={c.name} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={militaryCountryFilter[c.name] !== false}
+                                    onChange={e => setMilitaryCountryFilter(x => ({ ...x, [c.name]: e.target.checked }))}
+                                    className="accent-accent-500 scale-90"
+                                  />
+                                  <span className="opacity-80 flex-1 truncate">{c.name}</span>
+                                  <span className="opacity-50 font-mono tabular-nums text-[10px]">{c.count}</span>
+                                </label>
+                              ))}
+                          </div>
+                          <div className="flex gap-1 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = {};
+                                for (const c of militaryCountryList) next[c.name] = true;
+                                setMilitaryCountryFilter(next);
+                              }}
+                              className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 tracking-wider"
+                            >All on</button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = {};
+                                for (const c of militaryCountryList) next[c.name] = false;
+                                setMilitaryCountryFilter(next);
+                              }}
+                              className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-70 hover:opacity-100 tracking-wider"
+                            >All off</button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                   {/* Critical Infrastructure sub-panel. Rendered inline
