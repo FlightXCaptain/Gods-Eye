@@ -2207,54 +2207,11 @@ function App() {
     if (typeof window !== 'undefined') window.addEventListener('ge-countries-ready', handler);
     return () => { if (typeof window !== 'undefined') window.removeEventListener('ge-countries-ready', handler); };
   }, []);
-  // Enrich military features with country via point-in-polygon. Only
-  // runs when both the data AND the country polygons are available;
-  // cached by the `enrichedMilitary` memo so we don't recompute on
-  // every filter-checkbox toggle.
-  const enrichedMilitary = useMemo(() => {
-    const raw = data.military;
-    if (!Array.isArray(raw) || raw.length === 0) return raw || [];
-    if (typeof window === 'undefined') return raw;
-    const polys = window.countryPolygonFeatures;
-    const d3ref = window.d3;
-    if (!polys || !d3ref || !d3ref.geoContains) return raw;
-    return raw.map(m => {
-      if (m._country != null) return m; // already enriched
-      const lon = m.lon, lat = m.lat;
-      let hit = null;
-      for (const f of polys) {
-        const b = f._bbox;
-        if (!b) continue;
-        if (lon < b[0][0] || lon > b[1][0] || lat < b[0][1] || lat > b[1][1]) continue;
-        if (d3ref.geoContains(f, [lon, lat])) { hit = f.properties && f.properties.name; break; }
-      }
-      return { ...m, country: m.country || hit || 'Unknown', _country: hit || 'Unknown' };
-    });
-  }, [data.military, countriesVersion]);
-  // Country → count list, sorted by count desc then alpha.
-  const militaryCountryList = useMemo(() => {
-    if (!Array.isArray(enrichedMilitary)) return [];
-    const counts = new Map();
-    for (const m of enrichedMilitary) {
-      const c = m.country || 'Unknown';
-      counts.set(c, (counts.get(c) || 0) + 1);
-    }
-    const list = [...counts.entries()].map(([name, count]) => ({ name, count }));
-    list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-    return list;
-  }, [enrichedMilitary]);
-  // Auto-enable newly-seen countries on first appearance.
-  useEffect(() => {
-    if (militaryCountryList.length === 0) return;
-    setMilitaryCountryFilter(prev => {
-      const next = { ...prev };
-      let changed = false;
-      for (const c of militaryCountryList) {
-        if (!(c.name in next)) { next[c.name] = true; changed = true; }
-      }
-      return changed ? next : prev;
-    });
-  }, [militaryCountryList]);
+  // NOTE: the militaryCountryList + enrichedMilitary useMemos that depend on
+  // `data.military` live further down — after the `data` useState is
+  // declared — to avoid a TDZ / var-hoisting bug where Babel-standalone's
+  // browser-time compilation downlevels `const` to `var`, causing
+  // `data.military` to read as undefined on the first render.
 
   // GDELT news category (conflict vs non-conflict) + tone multi-selects.
   // Default: conflict on, non-conflict off — the API returns the full
@@ -2900,6 +2857,55 @@ function App() {
   //           whose track was last drawn 2 days ago is still obviously
   //           a current event that users expect to see. Scrubbing back
   //           in time shows events active at that past moment.
+  // Enrich military features with country via point-in-polygon. Runs
+  // when data AND country polygons are both available; memoized so
+  // filter-checkbox toggles don't trigger the expensive enrichment.
+  const enrichedMilitary = useMemo(() => {
+    const raw = data.military;
+    if (!Array.isArray(raw) || raw.length === 0) return raw || [];
+    if (typeof window === 'undefined') return raw;
+    const polys = window.countryPolygonFeatures;
+    const d3ref = window.d3;
+    if (!polys || !d3ref || !d3ref.geoContains) return raw;
+    return raw.map(m => {
+      if (m._country != null) return m;
+      const lon = m.lon, lat = m.lat;
+      let hit = null;
+      for (const f of polys) {
+        const b = f._bbox;
+        if (!b) continue;
+        if (lon < b[0][0] || lon > b[1][0] || lat < b[0][1] || lat > b[1][1]) continue;
+        if (d3ref.geoContains(f, [lon, lat])) { hit = f.properties && f.properties.name; break; }
+      }
+      return { ...m, country: m.country || hit || 'Unknown', _country: hit || 'Unknown' };
+    });
+  }, [data.military, countriesVersion]);
+  // Country → count list, sorted by count desc then alpha.
+  const militaryCountryList = useMemo(() => {
+    if (!Array.isArray(enrichedMilitary)) return [];
+    const counts = new Map();
+    for (const m of enrichedMilitary) {
+      const c = m.country || 'Unknown';
+      counts.set(c, (counts.get(c) || 0) + 1);
+    }
+    const list = [...counts.entries()].map(([name, count]) => ({ name, count }));
+    list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return list;
+  }, [enrichedMilitary]);
+  // Auto-enable newly-seen countries so toggling the layer on shows
+  // everything by default.
+  useEffect(() => {
+    if (militaryCountryList.length === 0) return;
+    setMilitaryCountryFilter(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const c of militaryCountryList) {
+        if (!(c.name in next)) { next[c.name] = true; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [militaryCountryList]);
+
   // Pre-compute the filtered military set so filteredData stays shallow.
   const filteredMilitary = useMemo(() => {
     if (!Array.isArray(enrichedMilitary)) return enrichedMilitary;
