@@ -16,10 +16,18 @@
 
 import { loadOverpassDataset } from './_overpass.js';
 
-export const config = { runtime: 'nodejs', maxDuration: 90 };
+// maxDuration tuned to Overpass reality: the four-tag union hits ~82s
+// wall time cold (9k+ results from a full-planet scan). 180s gives
+// headroom for network + JSON parse. Subsequent calls hit the 7-day
+// module cache and return instantly.
+export const config = { runtime: 'nodejs', maxDuration: 180 };
 
+// Overpass internal timeout set to 150s — generous enough for the
+// four-tag union (measured at ~82s) with margin for load spikes.
+// Kept below Vercel's maxDuration so Overpass times out cleanly
+// with a remark, rather than Vercel killing the function mid-stream.
 const QUERY = `
-[out:json][timeout:60];
+[out:json][timeout:150];
 (
   nwr["military"="base"]["name"];
   nwr["military"="airfield"]["name"];
