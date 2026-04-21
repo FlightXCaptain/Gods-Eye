@@ -463,7 +463,9 @@ const GlyphSVG = ({ kind, color = 'currentColor', size = 14 }) => {
 function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                          shipFilters, setShipFilters, flightFilters, setFlightFilters,
                          newsFilters, setNewsFilters,
-                         dcFilters, setDcFilters }) {
+                         dcFilters, setDcFilters,
+                         militaryCountryList, militaryCountryFilter, setMilitaryCountryFilter,
+                         militaryCountrySearch, setMilitaryCountrySearch }) {
   const [open, setOpen] = useState(false);
   const items = [
     ['flights','Flights', 'flight',  '#7dd3fc'],
@@ -564,6 +566,57 @@ function LayersPopover({ layers, setLayers, theme, seismicMin, setSeismicMin,
                       </span>
                     )}
                   </label>
+                  {/* Military bases country filter — searchable list with
+                      counts, multi-select, All on / All off. Default is
+                      every present country enabled so enabling the layer
+                      immediately shows all bases. */}
+                  {k === 'military' && layers.military && Array.isArray(militaryCountryList) && militaryCountryList.length > 0 && (
+                    <div className="pl-6 pr-2 pb-1.5 pt-0.5 space-y-1">
+                      <input
+                        type="text"
+                        value={militaryCountrySearch || ''}
+                        onChange={e => setMilitaryCountrySearch(e.target.value)}
+                        placeholder={`Filter ${militaryCountryList.length} countries…`}
+                        className="w-full text-[11px] px-2 py-1 rounded bg-black/10 dark:bg-white/10 placeholder-black/40 dark:placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-accent-500/50"
+                      />
+                      <div className="max-h-48 overflow-y-auto scroll -mr-1 pr-1">
+                        {militaryCountryList
+                          .filter(c => !militaryCountrySearch || c.name.toLowerCase().includes(militaryCountrySearch.toLowerCase()))
+                          .map(c => (
+                            <label key={c.name} className="flex items-center gap-1.5 py-0.5 text-[11px] cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={militaryCountryFilter[c.name] !== false}
+                                onChange={e => setMilitaryCountryFilter(x => ({ ...x, [c.name]: e.target.checked }))}
+                                className="accent-accent-500 scale-90"
+                              />
+                              <span className="opacity-80 flex-1 truncate">{c.name}</span>
+                              <span className="opacity-50 font-mono tabular-nums text-[10px]">{c.count}</span>
+                            </label>
+                          ))}
+                      </div>
+                      <div className="flex gap-1 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = {};
+                            for (const c of militaryCountryList) next[c.name] = true;
+                            setMilitaryCountryFilter(next);
+                          }}
+                          className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-accent-500/15 text-accent-500 hover:bg-accent-500/25 tracking-wider"
+                        >All on</button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = {};
+                            for (const c of militaryCountryList) next[c.name] = false;
+                            setMilitaryCountryFilter(next);
+                          }}
+                          className="text-[9px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 opacity-70 hover:opacity-100 tracking-wider"
+                        >All off</button>
+                      </div>
+                    </div>
+                  )}
                   {/* Critical Infrastructure sub-panel. Rendered inline
                       when the parent checkbox is on, matching the
                       flights/ships sub-filter pattern. Visual groups
@@ -2096,6 +2149,77 @@ function App() {
     localStorage.setItem('ge-dc-filters', JSON.stringify(merged));
   }, [dcFilters]);
 
+  // Military bases country filter. Enriched client-side via point-in-
+  // polygon against the country topojson that globe2.jsx loads; see
+  // `window.countryPolygonFeatures` + `ge-countries-ready` event for
+  // the ready signal. Persisted per-country toggles so a user who
+  // narrows to "United States" sees that filter survive reloads.
+  const [militaryCountryFilter, setMilitaryCountryFilter] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ge-military-country-filter')) || {}; } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('ge-military-country-filter', JSON.stringify(militaryCountryFilter)); } catch {}
+  }, [militaryCountryFilter]);
+  const [militaryCountrySearch, setMilitaryCountrySearch] = useState('');
+  // Re-render trigger when country polygons finish loading in globe2.
+  const [countriesVersion, setCountriesVersion] = useState(0);
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.countryPolygonFeatures) {
+      setCountriesVersion(v => v + 1);
+    }
+    const handler = () => setCountriesVersion(v => v + 1);
+    if (typeof window !== 'undefined') window.addEventListener('ge-countries-ready', handler);
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('ge-countries-ready', handler); };
+  }, []);
+  // Enrich military features with country via point-in-polygon. Only
+  // runs when both the data AND the country polygons are available;
+  // cached by the `enrichedMilitary` memo so we don't recompute on
+  // every filter-checkbox toggle.
+  const enrichedMilitary = useMemo(() => {
+    const raw = data.military;
+    if (!Array.isArray(raw) || raw.length === 0) return raw || [];
+    if (typeof window === 'undefined') return raw;
+    const polys = window.countryPolygonFeatures;
+    const d3ref = window.d3;
+    if (!polys || !d3ref || !d3ref.geoContains) return raw;
+    return raw.map(m => {
+      if (m._country != null) return m; // already enriched
+      const lon = m.lon, lat = m.lat;
+      let hit = null;
+      for (const f of polys) {
+        const b = f._bbox;
+        if (!b) continue;
+        if (lon < b[0][0] || lon > b[1][0] || lat < b[0][1] || lat > b[1][1]) continue;
+        if (d3ref.geoContains(f, [lon, lat])) { hit = f.properties && f.properties.name; break; }
+      }
+      return { ...m, country: m.country || hit || 'Unknown', _country: hit || 'Unknown' };
+    });
+  }, [data.military, countriesVersion]);
+  // Country → count list, sorted by count desc then alpha.
+  const militaryCountryList = useMemo(() => {
+    if (!Array.isArray(enrichedMilitary)) return [];
+    const counts = new Map();
+    for (const m of enrichedMilitary) {
+      const c = m.country || 'Unknown';
+      counts.set(c, (counts.get(c) || 0) + 1);
+    }
+    const list = [...counts.entries()].map(([name, count]) => ({ name, count }));
+    list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return list;
+  }, [enrichedMilitary]);
+  // Auto-enable newly-seen countries on first appearance.
+  useEffect(() => {
+    if (militaryCountryList.length === 0) return;
+    setMilitaryCountryFilter(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const c of militaryCountryList) {
+        if (!(c.name in next)) { next[c.name] = true; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [militaryCountryList]);
+
   // GDELT news category (conflict vs non-conflict) + tone multi-selects.
   // Default: conflict on, non-conflict off — the API returns the full
   // stream (all CAMEO root codes) so the UI is responsible for picking
@@ -2740,11 +2864,18 @@ function App() {
   //           whose track was last drawn 2 days ago is still obviously
   //           a current event that users expect to see. Scrubbing back
   //           in time shows events active at that past moment.
+  // Pre-compute the filtered military set so filteredData stays shallow.
+  const filteredMilitary = useMemo(() => {
+    if (!Array.isArray(enrichedMilitary)) return enrichedMilitary;
+    return enrichedMilitary.filter(m => militaryCountryFilter[m.country] !== false);
+  }, [enrichedMilitary, militaryCountryFilter]);
+
   const filteredData = useMemo(() => {
     const cutoff = nowCursor;
     const QUAKE_WINDOW = 24 * 3600 * 1000;
     return {
       ...data,
+      military: filteredMilitary,
       quakes: (data.quakes || []).filter(q =>
         q.time <= cutoff && q.time >= cutoff - QUAKE_WINDOW && (q.mag || 0) >= seismicMin
       ),
@@ -2782,7 +2913,7 @@ function App() {
         return true;
       }),
     };
-  }, [data, nowCursor, seismicMin, shipFilters, flightFilters, newsFilters]);
+  }, [data, nowCursor, seismicMin, shipFilters, flightFilters, newsFilters, filteredMilitary]);
 
   return (
     <div className="relative w-screen h-screen overflow-hidden">
@@ -2864,7 +2995,10 @@ function App() {
   shipFilters={shipFilters} setShipFilters={setShipFilters}
             newsFilters={newsFilters} setNewsFilters={setNewsFilters}
   flightFilters={flightFilters} setFlightFilters={setFlightFilters}
-  dcFilters={dcFilters} setDcFilters={setDcFilters}/>
+  dcFilters={dcFilters} setDcFilters={setDcFilters}
+  militaryCountryList={militaryCountryList}
+  militaryCountryFilter={militaryCountryFilter} setMilitaryCountryFilter={setMilitaryCountryFilter}
+  militaryCountrySearch={militaryCountrySearch} setMilitaryCountrySearch={setMilitaryCountrySearch}/>
             {/* Conflict news-feed dropdown. Feeds off data.news (raw,
                 pre–map-filter) so its filtering is independent of the
                 main layer's sub-toggles. */}
@@ -2901,7 +3035,10 @@ function App() {
   shipFilters={shipFilters} setShipFilters={setShipFilters}
             newsFilters={newsFilters} setNewsFilters={setNewsFilters}
   flightFilters={flightFilters} setFlightFilters={setFlightFilters}
-  dcFilters={dcFilters} setDcFilters={setDcFilters}/>
+  dcFilters={dcFilters} setDcFilters={setDcFilters}
+  militaryCountryList={militaryCountryList}
+  militaryCountryFilter={militaryCountryFilter} setMilitaryCountryFilter={setMilitaryCountryFilter}
+  militaryCountrySearch={militaryCountrySearch} setMilitaryCountrySearch={setMilitaryCountrySearch}/>
           <NewsPopover news={data.news} onPick={pickNewsItem}/>
           <button
             onClick={() => toggleAutoRotate()}
