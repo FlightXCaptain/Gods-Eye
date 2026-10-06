@@ -389,10 +389,10 @@ async function fetchTsunamis() {
   }));
 }
 
-/* Satellites — tle.ivanstanojevic.me (CelesTrak proxy with open CORS).
+/* Satellites — CelesTrak TLEs via our api/satellites.js proxy.
    Propagated live in browser via satellite.js SGP4. */
 
-// Satellite metadata lookup — the tle.* API includes names already, so we derive
+// Satellite metadata lookup — CelesTrak TLEs include names already, so we derive
 // "group" from the name prefix rather than needing a separate satcat fetch.
 let SATCAT_CACHE = null;
 async function loadSatcat() {
@@ -424,37 +424,18 @@ function classifySat(name) {
 }
 
 async function fetchSatellites() {
-  // The API returns pages of {name, line1, line2, satelliteId}. We pull a
-  // larger spread (~600 sats) so the orbital belt reads as a real swarm rather
-  // than a sparse sprinkle, plus dedicated searches for the major
-  // constellations so they render even if they're not in the first N pages.
-  const pages = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const PAGE_SIZE = 60;
-  const all = await Promise.all(pages.map(p =>
-    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?page=${p}&page-size=${PAGE_SIZE}`)
-  ));
-  const searches = await Promise.all([
-    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=starlink&page-size=60`),
-    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=iridium&page-size=40`),
-    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=oneweb&page-size=40`),
-    safeFetch(`https://tle.ivanstanojevic.me/api/tle/?search=gps&page-size=40`),
-  ]);
+  // Served by api/satellites.js — CelesTrak groups fetched server-side and
+  // CDN-cached for 2 h (mega-constellations down-sampled there).
+  const j = await safeFetch('/api/satellites', {}, 30000);
   const out = [];
-  const seen = new Set();
-  const consume = (j) => {
-    if (!j?.member) return;
-    for (const s of j.member) {
-      if (!s.line1 || !s.line2 || seen.has(s.satelliteId)) continue;
-      seen.add(s.satelliteId);
-      out.push({
-        name: s.name, tle1: s.line1, tle2: s.line2,
-        group: classifySat(s.name),
-        norad: s.satelliteId,
-      });
-    }
-  };
-  for (const p of all) consume(p);
-  for (const s of searches) consume(s);
+  for (const s of j?.member || []) {
+    if (!s.line1 || !s.line2) continue;
+    out.push({
+      name: s.name, tle1: s.line1, tle2: s.line2,
+      group: classifySat(s.name),
+      norad: s.satelliteId,
+    });
+  }
   return out;
 }
 
