@@ -2689,16 +2689,20 @@ function App() {
 
   // Satellites — fetch TLEs (rarely), propagate every 2s
   useEffect(() => {
-    let alive = true;
+    let alive = true, timer = null;
+    // Refresh every 6 h; if a load comes back empty, retry in 60 s instead
+    // of leaving the layer at 0 until the next 6-hour tick.
     const pull = async () => {
       const tles = await fetchSatellites();
-      if (!alive || !tles?.length) return;
-      setData(d => ({...d, satTLEs: tles }));
-      loadSatcat().catch(()=>{}); // kick off owner lookup
+      if (!alive) return;
+      if (tles?.length) {
+        setData(d => ({...d, satTLEs: tles }));
+        loadSatcat().catch(()=>{}); // kick off owner lookup
+      }
+      timer = setTimeout(pull, tles?.length ? 6*3600*1000 : 60*1000);
     };
     pull();
-    const id = setInterval(pull, 6*3600*1000); // every 6h
-    return () => { alive = false; clearInterval(id); };
+    return () => { alive = false; clearTimeout(timer); };
   }, []);
   useEffect(() => {
     const tick = () => {
