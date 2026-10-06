@@ -124,7 +124,7 @@ export default async function handler(req, res) {
       console.log(`[fires] loaded ${fires.length} detections from ${SENSOR}/${DAYS}d`);
     } catch (e) {
       console.warn('[fires] fetch failed:', e.message);
-      if (!cache) { res.status(502).json({ error: 'firms unavailable', detail: e.message }); return; }
+      if (!cache) { res.status(502).json({ error: 'firms unavailable' }); return; }
       // Keep serving the stale cache until we succeed again.
     }
   }
