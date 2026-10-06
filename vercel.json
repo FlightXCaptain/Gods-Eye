@@ -17,6 +17,7 @@
     "api/cyclones.js":          { "memory": 192, "maxDuration": 20 },
     "api/ship-history.js":      { "memory": 192, "maxDuration": 10 },
     "api/radar-outages.js":     { "memory": 192, "maxDuration": 15 },
-    "api/power-plants.js":      { "memory": 192, "maxDuration": 20 }
+    "api/power-plants.js":      { "memory": 192, "maxDuration": 20 },
+    "api/satellites.js":        { "memory": 192, "maxDuration": 30 }
   }
 }
