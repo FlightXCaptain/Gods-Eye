@@ -4,6 +4,6 @@
   "private": true,
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
-    "ws": "^8.18.0"
+    "ws": "^8.22.0"
   }
 }

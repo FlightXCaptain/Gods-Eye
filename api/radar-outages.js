@@ -26,7 +26,8 @@ export default async function handler(req, res) {
     const r = await fetch(url, { headers: { Authorization: `Bearer ${key}` } });
     const j = await r.json();
     if (!j.success) {
-      return res.status(502).json({ error: 'cloudflare-error', errors: j.errors });
+      console.warn('[radar-outages] cloudflare error:', JSON.stringify(j.errors));
+      return res.status(502).json({ error: 'cloudflare-error' });
     }
     const outages = (j.result?.annotations || []).map(a => ({
       id: a.id,
@@ -49,6 +50,7 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60');
     return res.status(200).json(outages);
   } catch (err) {
-    return res.status(502).json({ error: 'fetch-failed', message: String(err) });
+    console.warn('[radar-outages] fetch failed:', String(err));
+    return res.status(502).json({ error: 'fetch-failed' });
   }
 }
