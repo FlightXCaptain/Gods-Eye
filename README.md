@@ -148,6 +148,6 @@ Pushes to `main` deploy to production through the Vercel ↔ GitHub integration.
 
 ## Terms & credits
 
-Use of the site and this code is covered by the [Terms of Use](TERMS.md).
+Code is released under the [MIT License](LICENSE). Use of the hosted site is covered by the [Terms of Use](TERMS.md); third-party data stays under its publishers' own licences.
 
 Built on open data from USGS, NASA (EONET, FIRMS), NOAA (SWPC, NHC, NCEI), CelesTrak, airplanes.live, adsb.lol, adsb.fi, ADSBdb, AISStream, Blitzortung, Open-Meteo, GDELT, Cloudflare Radar, PeeringDB, TeleGeography, WRI, Global Energy Monitor, GeoNuclearData, Natural Earth ([world-atlas](https://github.com/topojson/world-atlas)) and © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors (ODbL). All data remains the property of its respective publishers.

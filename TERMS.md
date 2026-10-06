@@ -45,7 +45,7 @@ The Site has no accounts and does not ask for personal information. It uses Verc
 
 ## 8. Source code
 
-The source code in this repository is published for reference. Unless a `LICENSE` file states otherwise, no licence to reuse, modify or redistribute it is granted.
+The source code in this repository is licensed under the [MIT License](LICENSE). That licence covers the code only — it does not grant any rights in the third-party data the Site displays (see section 3), and it does not change these terms for use of the hosted Site.
 
 ## 9. Changes
 
