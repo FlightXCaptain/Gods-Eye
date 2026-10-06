@@ -38,7 +38,7 @@
 |---|---|
 | Flights | [airplanes.live](https://airplanes.live), [adsb.lol](https://adsb.lol), [adsb.fi](https://adsb.fi) (ADS-B); routes and airlines from [ADSBdb](https://www.adsbdb.com); optional ADS-B Exchange for ocean coverage |
 | Ships | [AISStream](https://aisstream.io) (AIS), with 30-day position history in Postgres |
-| Satellites | CelesTrak TLEs via [tle.ivanstanojevic.me](https://tle.ivanstanojevic.me), propagated in-browser with satellite.js |
+| Satellites | [CelesTrak](https://celestrak.org) TLEs (~1,800 objects: stations, navigation, weather, GEO, sampled Starlink/OneWeb), propagated in-browser with satellite.js |
 | ISS | [wheretheiss.at](https://wheretheiss.at) |
 | Earthquakes | [USGS](https://earthquake.usgs.gov) |
 | Natural events | [NASA EONET](https://eonet.gsfc.nasa.gov) — open storms, wildfires, volcanoes, ice |
