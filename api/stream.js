@@ -27,6 +27,7 @@
 
 import WebSocket from 'ws';
 import { shipDb, shipDbReady, ensureShipSchema, SHIP_RETENTION_DAYS } from './_ship-db.js';
+import { makeSources, fetchHotspot } from './_flight-sources.js';
 
 export const config = { runtime: 'nodejs', maxDuration: 300 };
 
@@ -326,11 +327,8 @@ const FLIGHT_HOTSPOTS = [
   [-54.8,-68.3],[78.22,15.65],
 ];
 
-const FLIGHT_HOSTS = [
-  'https://api.airplanes.live',
-  'https://api.adsb.lol',
-  'https://opendata.adsb.fi',
-];
+// Per-source URL shape, pacing and back-off live in _flight-sources.js.
+const FLIGHT_SOURCES = makeSources();
 
 let flightRefreshRunning = false;
 let flightSnapshotTimer = null;
@@ -373,12 +371,8 @@ async function flightSafeFetch(url, opts = {}, timeoutMs = 8000) {
   } catch { return null; }
 }
 
-async function flightFetchHotspot(la, lo) {
-  for (const host of FLIGHT_HOSTS) {
-    const j = await flightSafeFetch(`${host}/v2/point/${la}/${lo}/250`);
-    if (j?.ac?.length) return j.ac;
-  }
-  return [];
+function flightFetchHotspot(la, lo) {
+  return fetchHotspot(FLIGHT_SOURCES, la, lo);
 }
 
 // Global military aircraft feed. Merges into the same FLIGHTS map so they
