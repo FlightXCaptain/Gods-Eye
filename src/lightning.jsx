@@ -37,6 +37,27 @@
   let reconnectDelay = 3000;
   const RECONNECT_CAP = 60000;
 
+  // Blitzortung runs ws1–ws8, but not all are up at any one time (Oct
+  // 2026: ws3–ws6 refuse connections). Rather than a random pick that can
+  // land on a dead host and then wait out a backoff, walk a queue: the
+  // last host that worked first, the rest shuffled. A connection that dies
+  // before opening moves straight to the next host; backoff only applies
+  // once every host has failed in a row.
+  const HOSTS = [1, 2, 3, 4, 5, 6, 7, 8].map(n => `wss://ws${n}.blitzortung.org/`);
+  const GOOD_HOST_KEY = 'ge-lightning-host';
+  let hostQueue = [];
+
+  function buildHostQueue() {
+    let good = null;
+    try { good = localStorage.getItem(GOOD_HOST_KEY); } catch {}
+    const rest = HOSTS.filter(h => h !== good);
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    return HOSTS.includes(good) ? [good, ...rest] : rest;
+  }
+
   // Blitzortung LZW decoder — bytes ≥ 256 reference phrases built up
   // during decoding. Canonical impl shared by their own JS client.
   function decode(msg) {
@@ -65,8 +86,9 @@
 
   function connect() {
     try { if (ws) ws.close(); } catch {}
-    const n = 1 + Math.floor(Math.random() * 8);
-    const url = `wss://ws${n}.blitzortung.org/`;
+    if (!hostQueue.length) hostQueue = buildHostQueue();
+    const url = hostQueue.shift();
+    let opened = false;
     console.log('[lightning] opening', url);
     try {
       ws = new WebSocket(url);
@@ -79,7 +101,10 @@
     let strikesSinceLog = 0;
     let statsTimer = null;
     ws.onopen = () => {
+      opened = true;
       reconnectDelay = 3000;
+      hostQueue = [];  // next reconnect starts again from the remembered host
+      try { localStorage.setItem(GOOD_HOST_KEY, url); } catch {}
       ws.send(JSON.stringify({ a: 111 }));
       console.log(`[lightning] WS open → ${url} — subscribed {a:111}`);
       // Periodic stats so the user can see in DevTools whether
@@ -134,6 +159,9 @@
       if (statsTimer) clearInterval(statsTimer);
       statsTimer = null;
       console.warn(`[lightning] WS close code=${e.code} clean=${e.wasClean} reason=${e.reason || '(none)'}`);
+      // Host never opened and others are untried — fail over immediately.
+      if (!opened && hostQueue.length) { clearTimeout(reconnectTimer); reconnectTimer = setTimeout(connect, 0); return; }
+      hostQueue = [];
       scheduleReconnect();
     };
   }
